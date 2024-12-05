@@ -1,0 +1,190 @@
+---
+title: "Analysis Workflow Step 1: Fit and select in inner loops"
+author: "Gaylen Fronk"
+format: html
+---
+
+## Setup
+
+Load libraries
+```{r}
+library(glmnet)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(readr)
+library(purrr)
+library(furrr)
+library(parsnip)
+library(recipes)
+library(tune)
+library(yardstick)
+library(rsample)
+```
+
+Source functions file
+```{r}
+source(fun_moodivate.R)
+```
+
+## Read in data
+
+```{r}
+d <- read_csv("file_name.csv", show_col_types = FALSE)
+```
+
+Set up outcome variable levels
+```{r}
+y_col_name <- ""
+y_level_pos <- ""
+y_level_neg <- ""
+```
+
+Clean/prep as needed (class variables, set factor levels)
+```{r}
+d <- d |> 
+  # rename outcome to y
+  rename(y = !!y_col_name) |> 
+  # y as a factor with two intuitive levels
+  mutate(y = factor(y, levels = c(!!y_level_pos,
+                                  !!y_level_neg))) |> 
+  # character -> factor & set factor levels
+  mutate(across(c(),
+                ~ factor(., levels = c(),
+                         ordered = TRUE))) |> 
+  mutate(across(c(),
+                ~ factor(., levels = c(),
+                         ordered = FALSE))) |> 
+  # make any variables numeric that need it
+  mutate(across(c(),
+                ~ as.numeric(.)))
+
+
+```
+
+## Divide data (nested CV)
+
+Set cross-validation parameters
+```{r}
+cv_resample_type <- "nested"
+cv_outer_resample <- "3_x_10"
+cv_inner_resample <- "1_x_10"
+seed_splits <- 52592
+```
+
+Make splits (from fun_moodivate.R)
+```{r}
+splits <- d |> 
+  make_splits()
+```
+
+## Set up model configurations & build recipe
+
+Set model configuration parameters
+```{r}
+algorithm <- "glmnet"
+ml_mode <- "classification"
+
+# alpha (mixture)
+hp1_glmnet <- c(0.05, seq(.1, 1, length.out = 10)) 
+
+# lambda (penalty)
+hp2_glmnet_min <- -8 # min for penalty grid - will be passed into exp(seq(min, max, length.out = out))
+hp2_glmnet_max <- 2 # max for penalty grid
+hp2_glmnet_out <- 100 # length of penalty grid
+```
+
+Build recipe
+```{r}
+rec <- recipe(y ~ ., data = d) |> 
+  step_rm(subid) |> # or equivalent variable
+  step_zv(all_predictors) |> 
+  # impute missing data
+  step_impute_median(all_numeric_predictors()) |> 
+  step_impute_mode(all_nominal_predictors()) |> 
+  # normalize numeric features for skew
+  step_YeoJohnson(all_numeric_predictors()) |> 
+  # dummy code categorical features
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) |> 
+  step_zv(all_predictors()) |> 
+  # standardize features, required for glmnet for weighting
+  step_normalize(all_predictors()) |> 
+  # remove any features where there is still missingness (backup)
+  step_select(where(~ !any(is.na(.)))) |> 
+  # remove near-zero-variance features
+  step_nzv(all_predictors())
+```
+
+## Make configurations tibble
+
+This is a grid expansion of the splits and hyperparameters. Each row in the tibble will serve as a configuration that can then be fit below. This tibble will also be used to connect results to model configurations.
+
+Extract CV parameters from strings
+```{r}
+# outer cv loop
+outer_n_repeats <- as.numeric(str_remove(cv_outer_resample,
+                                         "_x_\\d{1,2}"))
+outer_n_folds <- as.numeric(str_remove(cv_outer_resample,
+                                       "\\d{1,3}_x_"))
+outer_split_num <- 1:(outer_n_repeats * outer_n_folds)
+
+# inner cv loop
+inner_n_repeats <- as.numeric(str_remove(cv_inner_resample,
+                                         "_x_\\d{1,2}"))
+inner_n_folds <- as.numeric(str_remove(cv_inner_resample,
+                                       "\\d{1,3}_x_"))
+inner_split_num <- 1:(inner_n_repeats * inner_n_folds)
+
+```
+
+Make configurations grid
+```{r}
+configs <- expand_grid(outer_split_num = outer_split_num,
+                       inner_split_num = inner_split_num,
+                       hp1 = hp1_glmnet,
+                       hp2 = NA_integer_) |> 
+  tibble::rownames_to_column("config_num") |> 
+  mutate(config_num = as.numeric(config_num))
+```
+
+## Fit models
+
+Set up wrapper function that contains tune_model() from fun_moodivate.R
+```{r}
+fit_eval <- function(config_current, configs, d, splits) {
+  
+  # filter single config row from configs
+  config <- configs |> 
+    filter(config_num == config_current)
+  
+  # fit model & get predictions and model metrics
+  results <- tune_model(config = config,
+                        rec = rec, 
+                        splits = splits, 
+                        ml_mode = ml_mode, 
+                        cv_resample_type = cv_resample_type,
+                        hp2_glmnet_min = hp2_glmnet_min, 
+                        hp2_glmnet_max = hp2_glmnet_max, 
+                        hp2_glmnet_out = hp2_glmnet_out,
+                        y_level_pos = y_level_pos)
+  
+  return(results)
+}
+
+```
+
+Fit models across all configurations
+```{r}
+results <- 1:max(configs$config_num) |> 
+  map(\(config_current) fit_eval(config_current, configs, 
+                                 d, splits)) |> 
+  list_rbind()
+```
+
+Save results
+```{r}
+results |> 
+  write_csv("results.csv")
+```
+
+
