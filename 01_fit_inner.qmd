@@ -75,7 +75,8 @@ seed_splits <- 52592
 Make splits (from fun_moodivate.R)
 ```{r}
 splits <- d |> 
-  make_splits()
+  make_splits(cv_resample_type, cv_resample, cv_outer_resample,
+              cv_inner_resample, the_seed = seed_splits)
 ```
 
 ## Set up model configurations & build recipe
