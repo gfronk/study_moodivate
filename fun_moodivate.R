@@ -63,6 +63,29 @@ make_splits <- function(d, cv_resample_type,
   return(splits)
 }
 
+make_rset <- function(splits, cv_resample_type, split_num = NULL, 
+                      inner_split_num = NULL, outer_split_num = NULL) {
+  # used to make an rset object that contains a single split for use in 
+  # tuning glmnet on CHTC  
+  
+  if (cv_resample_type == "nested") {
+    split <- splits$inner_resamples[[outer_split_num]] %>% 
+      slice(inner_split_num) 
+  }
+  
+  if (cv_resample_type == "kfold") {
+    split <- splits %>% 
+      slice(split_num)
+  }
+  
+  if (cv_resample_type == "boot") {
+    stop("Make rset does not work for bootstrap resamples")
+  }
+  
+  rset <- manual_rset(split$splits, split$id)
+  return(rset)
+}
+
 tune_model <- function(rec, splits, ml_mode, cv_resample_type, hp2_glmnet_min = NULL,
                        hp2_glmnet_max = NULL, hp2_glmnet_out = NULL, y_level_pos = NULL) {
   # config: single-row config-specific tibble from jobs
