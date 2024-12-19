@@ -7,7 +7,8 @@ make_splits <- function(d, cv_resample_type,
                         cv_resample = NULL, 
                         cv_outer_resample = NULL, 
                         cv_inner_resample = NULL, 
-                        the_seed = NULL) {
+                        the_seed = NULL,
+                        cv_group = NULL) {
   
   # d: (training) dataset to be resampled 
   # cv_resample_type: can be boot, kfold, or nested
@@ -86,7 +87,7 @@ make_rset <- function(splits, cv_resample_type, split_num = NULL,
   return(rset)
 }
 
-tune_model <- function(rec, splits, ml_mode, cv_resample_type, hp2_glmnet_min = NULL,
+tune_model <- function(config, rec, splits, ml_mode, cv_resample_type, hp2_glmnet_min = NULL,
                        hp2_glmnet_max = NULL, hp2_glmnet_out = NULL, y_level_pos = NULL) {
   # config: single-row config-specific tibble from jobs
   # splits: rset object that contains all resamples

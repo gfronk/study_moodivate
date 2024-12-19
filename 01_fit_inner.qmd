@@ -24,20 +24,20 @@ library(rsample)
 
 Source functions file
 ```{r}
-source(fun_moodivate.R)
+source("fun_moodivate.R")
 ```
 
 ## Read in data
 
 ```{r}
-d <- read_csv("file_name.csv", show_col_types = FALSE)
+d <- read_csv("S:/Projects/Dahne_J/Grants/2024-10_SteppedCare/development/data/toy_data.csv", show_col_types = FALSE)
 ```
 
 Set up outcome variable levels
 ```{r}
-y_col_name <- ""
-y_level_pos <- ""
-y_level_neg <- ""
+y_col_name <- "bdi_outcome"
+y_level_pos <- "responder"
+y_level_neg <- "non_responder"
 ```
 
 Clean/prep as needed (class variables, set factor levels)
@@ -45,19 +45,13 @@ Clean/prep as needed (class variables, set factor levels)
 d <- d |> 
   # rename outcome to y
   rename(y = !!y_col_name) |> 
+  mutate(y = case_when(
+                       y == 0 ~ "non_responder",
+                       y == 1 ~ "responder",
+                       TRUE ~ NA_character_)) %>% 
   # y as a factor with two intuitive levels
   mutate(y = factor(y, levels = c(!!y_level_pos,
-                                  !!y_level_neg))) |> 
-  # character -> factor & set factor levels
-  mutate(across(c(),
-                ~ factor(., levels = c(),
-                         ordered = TRUE))) |> 
-  mutate(across(c(),
-                ~ factor(., levels = c(),
-                         ordered = FALSE))) |> 
-  # make any variables numeric that need it
-  mutate(across(c(),
-                ~ as.numeric(.)))
+                                  !!y_level_neg))) 
 
 
 ```
@@ -98,20 +92,11 @@ hp2_glmnet_out <- 100 # length of penalty grid
 Build recipe
 ```{r}
 rec <- recipe(y ~ ., data = d) |> 
-  step_rm(subid) |> # or equivalent variable
-  step_zv(all_predictors) |> 
-  # impute missing data
-  step_impute_median(all_numeric_predictors()) |> 
-  step_impute_mode(all_nominal_predictors()) |> 
+  step_rm(record_id) |>
   # normalize numeric features for skew
-  step_YeoJohnson(all_numeric_predictors()) |> 
-  # dummy code categorical features
-  step_dummy(all_nominal_predictors(), one_hot = FALSE) |> 
-  step_zv(all_predictors()) |> 
+  # step_YeoJohnson(all_numeric_predictors()) |> 
   # standardize features, required for glmnet for weighting
   step_normalize(all_predictors()) |> 
-  # remove any features where there is still missingness (backup)
-  step_select(where(~ !any(is.na(.)))) |> 
   # remove near-zero-variance features
   step_nzv(all_predictors())
 ```
@@ -179,7 +164,8 @@ Fit models across all configurations
 results <- 1:max(configs$config_num) |> 
   map(\(config_current) fit_eval(config_current, configs, 
                                  d, splits)) |> 
-  list_rbind()
+  list_rbind() %>% 
+  mutate(new_config_num = 1:nrow(.))
 ```
 
 Save results
