@@ -1,0 +1,111 @@
+---
+title: "Analysis Workflow Step 2: Inner Loop Model Selection"
+author: "Gaylen Fronk"
+format: html
+---
+
+## Setup
+
+Load libraries
+```{r}
+library(tidyverse)
+library(tidymodels)
+```
+
+Source functions file
+```{r}
+source("fun_moodivate.R")
+```
+
+Chunk defaults
+```{r defaults}
+#| include: false
+
+knitr::opts_chunk$set(attr.output='style="max-height: 500px;"')
+
+options(tibble.width = Inf)
+options(tibble.print_max = Inf)
+```
+
+## Read in data
+
+Results file from 01_fit_inner.qmd
+```{r}
+results <- read_csv("results_inner.csv", show_col_types = FALSE) |> 
+  glimpse()
+```
+
+## Process metrics
+
+Check for duplicates
+```{r duplicates}
+nrow(results)
+
+results <- results |> 
+  distinct(outer_split_num, inner_split_num, hp1, hp2,
+           .keep_all = TRUE)
+
+nrow(results)
+```
+No duplicates
+
+Checks that breakdowns are as expected
+```{r}
+results |> janitor::tabyl(outer_split_num) 
+results |> janitor::tabyl(inner_split_num) 
+results |> janitor::tabyl(hp1) 
+results |> janitor::tabyl(hp2) 
+```
+
+## Median metrics across inner folds for model configurations
+
+```{r}
+metrics_avg <- results |> 
+  group_by(outer_split_num, hp1, hp2) |> 
+  summarize(across(c(accuracy, roc_auc,
+                     sens, spec, ppv, npv),
+                   median),
+            n_jobs = n(), .groups = "drop") |> 
+  relocate(n_jobs) |> 
+  arrange(desc(roc_auc)) |> 
+  ungroup()
+```
+
+Review
+```{r}
+metrics_avg |> 
+  slice(1:50) |> 
+  print()
+
+metrics_avg |> 
+  pull(roc_auc) |> 
+  hist()
+```
+
+Save average metrics file
+```{r}
+metrics_avg |> 
+  arrange(outer_split_num, inner_split_num, hp1, hp2) |> 
+  readr::write_csv(file.path(, "metrics_inner_avg.csv"))
+```
+
+## Plot hyperparameters
+
+
+
+```{r}
+plot_hp <- metrics_avg |> 
+  mutate(hp1 = factor(hp1, ordered = TRUE)) |> 
+  ggplot(mapping = aes(x = log(hp2),
+                       y = roc_auc,
+                       group = hp1,
+                       color = hp1)) +
+  geom_line() +
+  scale_color_discrete(name = "mixture (alpha)") +
+  labs(title = "Plotting performance by glmnet hyperparameters",
+       x = "penalty (lambda)",
+       y = "auROC")
+
+plot_hp
+```
+
