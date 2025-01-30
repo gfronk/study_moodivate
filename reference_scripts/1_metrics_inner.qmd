@@ -1,0 +1,517 @@
+---
+title: "Combines batches of training jobs from CHTC for version `r params$version` using `r params$cv` CV for outcome `r params$y_col_name`"
+author: "Gaylen Fronk, John Curtin, & Kendra Wyant"
+date: "`r lubridate::today()`"
+output: 
+  html_document:
+    toc: true 
+    toc_depth: 4
+format:
+  html:
+    embed-resources: true
+editor_options: 
+  chunk_output_type: console
+---
+
+### Code Status
+
+In use for both kfold and nested cv, including use of batches
+
+This script aggregates all results/metrics for a batch or batches of jobs that train all model configurations for a specific outcome/label window.
+
+### Set Up Environment
+
+```{r set_variables}
+study <- "match"
+version <- "v6"
+cv <- "kfold"
+algorithms <- "glmnet_manual"
+y_col_name <- "pp_hybrid_wk12_outcome"
+
+```
+
+Packages for script
+
+```{r, packages_script}
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(tidymodels)
+
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_eda.R?raw=true")
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/chtc/static_files/fun_chtc.R?raw=true")
+theme_set(theme_classic()) 
+```
+
+Handle conflicts
+
+```{r, packages_workflow}
+#| message: false
+#| warning: false
+
+options(conflicts.policy = "depends.ok")
+```
+
+Absolute paths
+
+```{r, absolute paths}
+switch (Sys.info()[['sysname']],
+        # PC paths
+        Windows = {
+          path_input <- stringr::str_c("P:/studydata/match/chtc/", 
+                                       y_col_name)
+          path_models <- stringr::str_c("P:/studydata/match/models/", 
+                                        y_col_name)
+          path_knits <- stringr::str_c("P:/studydata/match/knits/", 
+                                       y_col_name)},
+        
+        # IOS paths
+        Darwin = {
+          path_input <- stringr::str_c("/Volumes/private/studydata/match/chtc/", 
+                                       y_col_name)
+          path_models <- stringr::str_c("/Volumes/private/studydata/match/models/", 
+                                        y_col_name)
+          path_knits <- stringr::str_c("/Volumes/private/studydata/match/knits/", 
+                                       y_col_name)},
+        
+        # Linux paths
+        Linux = {
+          path_input <- stringr::str_c("~/mnt/private/studydata/match/chtc/", 
+                                       y_col_name)
+          path_models <- stringr::str_c("~/mnt/private/studydata/match/models/", 
+                                        y_col_name)
+          path_knits <- stringr::str_c("~/mnt/private/studydata/match/knits/", 
+                                       y_col_name)}
+)
+```
+
+Chunk Defaults
+
+```{r defaults}
+#| include: false
+
+knitr::opts_chunk$set(attr.output='style="max-height: 500px;"')
+
+options(tibble.width = Inf)
+options(tibble.print_max = Inf)
+```
+
+### Read results.csv files
+
+Set up object for results
+
+```{r}
+results_all <- NULL
+params_all <- NULL
+```
+
+Get batch_names
+
+```{r get_batch_names}
+batch_names <- list.dirs(path_input, full.names = FALSE, recursive = FALSE)
+
+if (algorithms == "all") {
+  batch_names <- batch_names[stringr::str_detect(batch_names, "train") & 
+                               stringr::str_detect(batch_names, cv) &
+                               stringr::str_detect(batch_names, version)]
+} else {
+  batch_names <- batch_names[stringr::str_detect(batch_names, "train") & 
+                               stringr::str_detect(batch_names, cv) &
+                               stringr::str_detect(batch_names, version) &
+                               stringr::str_detect(batch_names, algorithms)]
+}
+
+batch_names
+```
+
+Loop over batch_names to read in files and perform checks
+
+```{r loop_batches}
+
+for (batch_name in batch_names) {
+  message("Processing Batch: ", batch_name)
+  
+  # read in configs
+  configs <- readr::read_csv(file.path(path_input, batch_name, 
+                                       "input", "configs.csv"), 
+                             show_col_types = FALSE)
+  (n_configs <- nrow(configs))
+  
+  if (stringr::str_detect(batch_name, "glmnet")) {
+    n_configs <- n_configs * 200
+  }
+  if (stringr::str_detect(batch_name, "manual")) {
+    n_configs <- nrow(configs)
+  }
+  
+  # read in results
+  results_batch <- readr::read_csv(file.path(path_input, batch_name, "output", 
+                                             "batch_results.csv"), 
+                                   show_col_types = FALSE)
+  (n_results_batch <- nrow(results_batch))
+  
+  # Check counts of results files
+  if (!(n_configs == n_results_batch)) {
+    stop(n_configs, " configs != ", n_results_batch, " results files!")
+  } else {
+    message(n_results_batch, " results files detected.  Correct!")
+  }
+  
+  # Check col count
+  if (!(ncol(results_batch) == 17)) {
+    stop(ncol(results_batch), " columns != 17")
+  } else {
+    message(ncol(results_batch), " columns detected.  Correct!\n")
+  }
+  
+  # Add batch to all metrics
+  results_all <- results_all %>% 
+    bind_rows(results_batch)
+  
+  if (str_detect(batch_name, "manual")) {
+    file_names <- list.files(file.path(path_input, batch_name, 
+                                       "output", "params"))
+    
+    params_batch <- file_names |> 
+      map(\(fn) read_rds(file.path(path_input, batch_name, 
+                                   "output", "params",
+                                   fn))) |> 
+      list_rbind()
+    
+    n_params_batch <- nrow(params_batch)
+    
+    # check counts of params rows
+    if (!(n_configs == n_params_batch)) {
+      stop (n_configs, " configs != ", n_params_batch, " params rows!")
+    } else {
+      message(nrow(params_batch), " params rows detected. Correct!")
+    }
+    
+    params_all <- params_all |> 
+      bind_rows(params_batch)
+  }
+}
+
+rm(configs) # save some memory
+```
+
+### Tally parameters
+
+```{r}
+if (!(is.null(params_all))) {
+  
+  # add empty count columns
+  params_all <- params_all |> 
+    mutate(n_feat = NA_real_,
+           n_tx = NA_real_)
+  
+  param_rows <- nrow(params_all)
+  
+  # make function
+  count_params <- function(params_all, p_row) {
+    
+    param <- params_all |> 
+      slice(p_row)
+    
+    n_feat_param <- length(param$value[[1]])
+    n_tx_param <- sum(str_count(param$value[[1]], "treatment_"))
+    
+    param <- param |> 
+      mutate(n_feat = n_feat_param,
+             n_tx = n_tx_param)
+    
+    return(param)
+    
+  }
+  
+  # map over rows to add counts
+  params <- 1:param_rows |> 
+    map(\(p_row) count_params(params_all = params_all, p_row)) |> 
+    list_rbind() |> 
+    rename(param_names = value)
+  
+  if (any(is.na(params$n_tx)) | any(is.na(params$n_feat))) {
+    stop("Missing values in parameter counts")
+  } else {
+    message("No missing values in feature or treatment interaction counts!")
+  }
+  
+  rm(params_all) # tibble without values filled in, save some memory
+  
+  # save raw file out
+  params |> 
+    write_rds(file.path(path_models, 
+                        stringr::str_c("params_", version, "_",
+                                       cv, ".rds")))
+  
+  # merge into results_all
+  results_all <- results_all |> 
+    full_join(params, by = c("config_num", "split_num", "outer_split_num",
+                             "inner_split_num", "algorithm",
+                             "feature_set", "hp1", "hp2", "hp3",
+                             "resample")) |> 
+    select(-param_names)
+  
+  rm(params) # save some memory!
+}
+```
+
+
+### Wrap up processing of raw metrics
+
+Remove duplicate rows (e.g., same hyper-parameters across multiple batches)
+
+```{r duplicates}
+nrow(results_all)
+
+results_all <- results_all |> 
+  distinct(split_num, outer_split_num, inner_split_num, algorithm, feature_set,
+           hp1, hp2, hp3, resample, .keep_all = TRUE)
+
+nrow(results_all)
+```
+
+Final checks across all batches
+
+```{r tables}
+results_all %>% tab(outer_split_num) %>% print()
+results_all %>% tab(inner_split_num) %>% print()
+results_all |> tab(split_num) |> print()
+results_all %>% tab(algorithm) %>% print()
+results_all %>% tab(feature_set) %>% print()
+results_all %>% tab(hp1) %>% print()
+results_all %>% tab(hp2) %>% print()
+results_all %>% tab(resample) %>% print()
+```
+
+Save raw metrics file
+
+```{r save_results}
+results_all %>% 
+  # arrange(split_num, outer_split_num, inner_split_num, algorithm, resample
+  readr::write_csv(file.path(path_models, 
+                             stringr::str_c("inner_metrics_", 
+                                            version, "_", cv, ".csv")))
+```
+
+### Median metrics across inner folds for model configurations
+
+Inner loop performance of best config.
+This median performance for each configuration over inner x outer folds (e.g., 300 folds for 1x10 inner and 3x10 outer). It is what we would get (essentially) if we just did simple k-fold but with LOTs of folds
+
+```{r metrics_avg}
+if (cv == "nested") {
+  if (algorithms == "glmnet_manual") {
+    
+    metrics_avg <- results_all %>% 
+      group_by(outer_split_num, algorithm, feature_set, 
+               hp1, hp2, hp3, resample) %>% 
+      summarize(across(c(roc_auc, 
+                         n_tx),
+                       median),
+                n_jobs = n(), .groups = "drop") %>% 
+      relocate(n_jobs) %>% 
+      arrange(desc(roc_auc)) |> 
+      ungroup()
+  } else {
+    metrics_avg <- results_all %>% 
+      group_by(outer_split_num, algorithm, feature_set, 
+               hp1, hp2, hp3, resample) %>% 
+      summarize(across(c(accuracy, bal_accuracy, roc_auc, 
+                         sens, spec, ppv, npv),
+                       median),
+                n_jobs = n(), .groups = "drop") %>% 
+      relocate(n_jobs) %>% 
+      arrange(desc(roc_auc)) |> 
+      ungroup()
+  }
+  
+}
+
+if (cv == "kfold") {
+  metrics_avg <- results_all %>% 
+    group_by(algorithm, feature_set, hp1, hp2, hp3, resample) %>% 
+    summarize(across(c(roc_auc, 
+                       n_tx),
+                     median),
+              n_jobs = n(), .groups = "drop") %>% 
+    relocate(n_jobs) %>% 
+    arrange(desc(roc_auc)) |> 
+    ungroup()
+}
+
+metrics_avg |> 
+  slice(1:50) |> 
+  print_kbl()
+
+metrics_avg |> 
+  filter(n_tx >= 50) |> 
+  slice(1:50) |> 
+  print_kbl(digits = 4)
+
+best_config <- metrics_avg |> 
+  filter(n_tx >= 50) |> 
+  slice(1) |> 
+  print()
+
+if (cv == "kfold") {
+  best_config <- metrics_avg |> 
+    filter(n_tx >= 50) |> 
+    slice(1) |> 
+    print()
+  
+  best_config |> 
+    write_csv(file.path(path_models, str_c("best_config_", 
+                                           version, ".csv")))
+}
+```
+
+For glmnet manual: auROC by n_tx features
+```{r}
+if (algorithms == "glmnet_manual") {
+  # raw n_tx
+  
+  n95 <- quantile(metrics_avg$n_tx, 0.95)
+  n25 <- quantile(metrics_avg$n_tx, 0.25)
+  n50 <- quantile(metrics_avg$n_tx, 0.5)
+  n75 <- quantile(metrics_avg$n_tx, 0.75)
+  
+  metrics_avg |> 
+    ggplot(aes(x = n_tx, y = roc_auc)) +
+    geom_point(alpha = 0.01, colour = "grey") +
+    geom_smooth(colour = "red")
+  
+  metrics_avg |> 
+    filter(n_tx < n95) |> 
+    ggplot(aes(x = n_tx, y = roc_auc)) +
+    geom_point(alpha = 0.01, colour = "grey") +
+    geom_smooth(colour = "red")
+  
+  metrics_avg |> 
+    filter(n_tx < 150) |> 
+    ggplot(aes(x = n_tx, y = roc_auc)) +
+    geom_point(alpha = 0.01, colour = "grey") +
+    geom_smooth(colour = "red")
+  
+  metrics_avg |> 
+    filter(n_tx > 0 & n_tx < 100) |> 
+    filter(roc_auc > 0.7) |> 
+    ggplot(aes(x = n_tx, y = roc_auc)) +
+    geom_point(alpha = 0.5, colour = "grey") +
+    geom_smooth(colour = "red")
+  
+  metrics_avg |> 
+    filter(n_tx < n95) |> 
+    group_by(n_tx) |> 
+    summarize(median_auroc = median(roc_auc)) |> 
+    ggplot(aes(x = n_tx, y = median_auroc)) +
+    geom_line()
+  
+  metrics_avg |> 
+    filter(n_tx < 100) |> 
+    ggplot(aes(x = n_tx)) +
+    geom_histogram(binwidth = 5)
+  
+  metrics_avg |> 
+    filter(n_tx < n95 & n_tx > 0) |> 
+    ggplot(aes(x = n_tx)) +
+    geom_histogram(binwidth = 10)
+  
+  metrics_avg |> 
+    filter(n_tx < n95) |> 
+    ggplot(aes(x = n_tx, y = roc_auc)) +
+    geom_point(alpha = 0.01, colour = "grey") +
+    geom_smooth(colour = "red") +
+    geom_vline(xintercept = n25) +
+    geom_vline(xintercept = n50) +
+    geom_vline(xintercept = n75)
+  
+  
+  # proportion n_tx / n_feat
+  p25 <- metrics_avg |> mutate(prop_tx = n_tx / n_feat) |> pull(prop_tx) |> quantile(0.25)
+  p50 <- metrics_avg |> mutate(prop_tx = n_tx / n_feat) |> pull(prop_tx) |> quantile(0.5)
+  p75 <- metrics_avg |> mutate(prop_tx = n_tx / n_feat) |> pull(prop_tx) |> quantile(0.75)
+  
+  metrics_avg |> 
+    mutate(prop_tx = n_tx / n_feat) |> 
+    ggplot(aes(x = prop_tx)) +
+    geom_histogram(binwidth = 0.05)
+  
+  metrics_avg |> 
+    mutate(prop_tx = n_tx / n_feat) |> 
+    filter(prop_tx > 0) |> 
+    ggplot(aes(x = prop_tx)) +
+    geom_histogram(binwidth = 0.05) 
+  
+  metrics_avg |> 
+    mutate(prop_tx = n_tx / n_feat) |> 
+    ggplot(aes(x = prop_tx, y = roc_auc))  +
+    geom_point(alpha = 0.01, colour = "grey") +
+    geom_smooth(colour = "red")
+  
+  metrics_avg |> 
+    mutate(prop_tx = n_tx / n_feat) |> 
+    filter(prop_tx > 0) |> 
+    ggplot(aes(x = prop_tx, y = roc_auc))  +
+    geom_point(alpha = 0.01, colour = "grey") +
+    geom_smooth(colour = "red")
+  
+  metrics_avg |> 
+    mutate(prop_tx = n_tx / n_feat) |> 
+    ggplot(aes(x = prop_tx, y = roc_auc))  +
+    geom_point(alpha = 0.01, colour = "grey") +
+    geom_smooth(colour = "red") +
+    geom_vline(xintercept = p25) +
+    geom_vline(xintercept = p50) +
+    geom_vline(xintercept = p75)
+  
+  
+}
+```
+
+Performance metric plot across all inner folds
+
+```{r metrics_plot}
+results_all |> 
+  filter(algorithm == best_config$algorithm,
+         feature_set == best_config$feature_set,
+         hp1 == best_config$hp1,
+         hp2 == best_config$hp2,
+         resample == best_config$resample) |> 
+  ggplot(aes(x = roc_auc)) +
+  geom_histogram(bins = 10)
+```
+
+### Plot hyperparameters
+
+```{r plot_hyperparameters}
+# update algorithms to actual ones in the tibble
+
+feature_sets <- unique(metrics_avg$feature_set) 
+
+for (i in feature_sets) {
+  
+  results_i <- metrics_avg %>% 
+    filter(feature_set == i)
+  
+  plot_title <- stringr::str_c("Plotting glmnet hyperparameters for ", 
+                               i, " feature set")
+  
+  plot_i <- results_i %>%
+    mutate(hp1 = factor(hp1, ordered = TRUE),
+           resample = factor(resample)) %>% 
+    ggplot(mapping = aes(x = log(hp2), 
+                         y = roc_auc, 
+                         group = hp1, 
+                         color = hp1)) +
+    geom_line() +
+    facet_wrap(vars(resample)) +
+    scale_color_discrete(name = "mixture (alpha)") +
+    labs(title = plot_title, x = "penalty (lambda)", y = "ROC AUC")
+  
+  print(plot_i)
+  
+}
+
+```

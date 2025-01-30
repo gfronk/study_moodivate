@@ -1,0 +1,233 @@
+---
+title: "Evaluate models' performance in held out outer folds for version `r version`"
+author: "Gaylen Fronk, John Curtin, & Kendra Wyant"
+date: "`r lubridate::today()`"
+output: 
+  html_document:
+    toc: true 
+    toc_depth: 4
+format:
+  html:
+    embed-resources: true
+editor_options: 
+  chunk_output_type: console
+---
+
+### Code Status
+
+In use with iterative improvement
+
+### Notes
+This is a generic script that reproduces the CV metrics for the best model configuration, calculates various performance metrics from that resampling, makes plots, and then fits the best config to the final sample to do feature importance.
+
+
+### Set Up Environment
+
+```{r set_values}
+version <- "v6"
+cv <- "nested"
+y_col_name <- "pp_hybrid_wk4_outcome"
+```
+
+Function conflicts
+```{r, packages_workflow}
+#| message: false
+#| warning: false
+
+# source
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_ml.R?raw=true")
+
+# handle conflicts
+options(conflicts.policy = "depends.ok")
+tidymodels_conflictRules()
+```
+
+Packages for script
+```{r, packages_script}
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(tidymodels)
+library(tidyposterior)
+# library(SHAPforxgboost)
+# library(rstanarm)
+
+theme_set(theme_classic()) 
+```
+
+Source support functions
+```{r source_functions}
+# EDA
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_eda.R?raw=true")
+
+# CHTC support functions
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/chtc/static_files/fun_chtc.R?raw=true")
+```
+
+Absolute paths
+```{r, absolute_paths}
+switch (Sys.info()[['sysname']],
+        # PC paths
+        Windows = {
+          path_input <- str_c("P:/studydata/match/chtc/", y_col_name)
+          path_models <- str_c("P:/studydata/match/models/", y_col_name)
+          path_knits <- str_c("P:/studydata/match/knits/", y_col_name)},
+        
+        # IOS paths
+        Darwin = {
+          path_input <- str_c("/Volumes/private/studydata/match/chtc/", y_col_name)
+          path_models <- str_c("/Volumes/private/studydata/match/models/", y_col_name)
+          path_knits <- str_c("/Volumes/private/studydata/match/knits/", y_col_name)},
+        
+        # Linux paths
+        Linux = {
+          path_input <- str_c("~/mnt/private/studydata/match/chtc/", y_col_name)
+          path_models <- str_c("~/mnt/private/studydata/match/models/", y_col_name)
+          path_knits <- str_c("~/mnt/private/studydata/match/knits/", y_col_name)}
+)
+```
+
+Chunk Defaults
+```{r defaults}
+#| include: false
+
+knitr::opts_chunk$set(attr.output='style="max-height: 500px;"')
+
+options(tibble.width = Inf)
+options(tibble.print_max = Inf)
+```
+
+
+Source training controls 
+```{r source}
+# EDA
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_eda.R?raw=true")
+
+# CHTC support functions
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/chtc/static_files/fun_chtc.R?raw=true")
+
+# ML functions
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_ml.R?raw=true")
+
+```
+
+
+### Model Performance Metrics
+
+```{r read_metrics_preds}
+
+preds_out <- read_rds(file.path(path_models, 
+                                str_c("outer_preds_", version, 
+                                      "_", cv, ".rds"))) |> 
+  glimpse()
+
+metrics_out <- read_rds(file.path(path_models, 
+                                  str_c("outer_metrics_", version, 
+                                        "_", cv, ".rds"))) |> 
+  glimpse()
+
+```
+
+#### Inner Loop AUC
+
+Best model configurations were selected using the median AUCs across 10 inner folds.  30 (3x10) models were selected.  
+
+```{r}
+metrics_out |> 
+  summarize(median(roc_auc_in), mean(roc_auc_in), 
+            min(roc_auc_in), max(roc_auc_in), sd(roc_auc_in))
+```
+
+#### Outer AUC
+
+Best model configurations were evaluated using the AUCs from the 30 (3x10) outer folds
+
+Outer overall
+```{r metrics_out}
+metrics_out |> 
+  summarize(median(roc_auc), mean(roc_auc),
+            min(roc_auc), max(roc_auc), sd(roc_auc))
+```
+
+Side by side of inner & outer median AUCs
+```{r}
+metrics_out |> 
+  summarize(median(roc_auc), median(roc_auc_in))
+```
+
+Plot outer folds
+```{r plot_outer}
+metrics_out |> 
+  ggplot(aes(x = roc_auc)) +
+  geom_histogram(bins = 10) 
+
+```
+
+Table for each outer fold
+```{r metrics_out_kbl}
+metrics_out |> 
+  print_kbl()
+```
+
+#### ROC curve
+This is single ROC by concatenating all outer folds.
+Could consider reporting this AUC though likely average of outer fold AUCs is more appropriate. Could also consider curves for each outer fold
+```{r roc_info}
+preds_out %>%
+  roc_auc(prob_raw, truth = label)
+
+roc_data <- preds_out %>%
+  roc_curve(prob_raw, truth = label)
+
+roc_data %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity, color = .threshold)) +
+  geom_path(linewidth = 2) +
+  geom_abline(lty = 3) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "False Positive Rate",
+       y = "True Positive Rate",
+       color = "Threshold") +
+  scale_x_continuous(breaks = seq(0,1,.25),
+    labels = sprintf("%.2f", seq(1,0,-.25))) +
+  scale_color_gradient(low="blue", high="red") +
+  theme(axis.text = element_text(size = rel(1.50)),
+        axis.title = element_text(size = rel(1.75)))
+```
+
+```{r}
+
+# rocs per fold
+roc_folds <- preds_out %>%
+  nest(.by = outer_split_num, .key = "preds") |> 
+  mutate(roc = map(preds, \(preds) roc_curve(preds, prob_raw, 
+                                             truth = label)))
+
+fig_roc_folds <- roc_data %>%  # plot region from full concatenated data 
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) + 
+  geom_abline(lty = 3) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "False Positive Rate",
+       y = "True Positive Rate") +
+  scale_x_continuous(breaks = seq(0,1,.25),
+                     labels = sprintf("%.2f", seq(1,0,-.25))) +
+  theme(axis.text = element_text(size = rel(1.25)),
+        axis.title = element_text(size = rel(1.5)))
+
+for (i in 1:nrow(roc_folds)) {
+  fig_roc_folds <- fig_roc_folds +
+    geom_path(data = roc_folds$roc[[i]],
+              mapping = aes(x = 1 - specificity, y = sensitivity),
+              color = "gray")
+}
+
+#add full concatenated curve
+fig_roc_folds +
+  geom_path(data = roc_data,
+            mapping = aes(x = 1 - specificity, y = sensitivity, color = .threshold),
+            linewidth = 2) +
+  scale_color_gradient(low="blue", high="red") +
+  labs(color = "Threshold",
+       x = "False Positive Rate")
+```
+

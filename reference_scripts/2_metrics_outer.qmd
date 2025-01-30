@@ -1,0 +1,330 @@
+---
+title: "Fits and evaluates best model configs in outer loop of nested for MATCH (version `r version`)"
+author: "Gaylen Fronk, John Curtin, & Kendra Wyant"
+date: "`r lubridate::today()`"
+output: 
+  html_document:
+    toc: true 
+    toc_depth: 4
+format:
+  html:
+    embed-resources: true
+editor_options: 
+  chunk_output_type: console
+---
+
+### Code Status
+
+Updated for MATCH study
+
+### Notes
+This script reads in CHTC performance metrics from the inner loops of CV, selects the best model configuration for each outer loop, trains those models and predicts into the outer held-out folds.  Returns metrics, predictions (probabilities) and SHAPs
+
+This script creates the following files in the y_col_name subfolder of the `models` folder
+
+* outer_metrics_*.rds
+* outer_preds_*.rds
+
+where * = version_cv
+
+### To Do
+
+SHAPS
+
+For MATCH, we are not calculating Shapley values in this script for all outer loop best models. They will be calculated only on the single, final model using CHTC. 
+
+### Set Up Environment
+
+```{r set_values}
+version <- "v6"
+cv <- "nested"
+algorithms <- "glmnet"
+y_col_name <- "pp_hybrid_wk4_outcome"
+
+```
+
+Function conflicts
+```{r, packages_workflow}
+#| message: false
+#| warning: false
+
+# source
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_ml.R?raw=true")
+
+# handle conflicts
+options(conflicts.policy = "depends.ok")
+tidymodels_conflictRules()
+```
+
+Packages for script
+```{r, packages_script}
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(tidymodels)
+library(probably)
+library(furrr)
+```
+
+Source support functions
+```{r source_functions}
+# EDA
+devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_eda.R?raw=true")
+```
+
+Absolute paths
+```{r, absolute_paths}
+switch (Sys.info()[['sysname']],
+        # PC paths
+        Windows = {
+          path_input <- str_c("P:/studydata/match/chtc/", y_col_name)
+          path_models <- str_c("P:/studydata/match/models/", y_col_name)},
+        
+        # IOS paths
+        Darwin = {
+          path_input <- str_c("/Volumes/private/studydata/match/chtc/", y_col_name)
+          path_models <- str_c("/Volumes/private/studydata/match/models/", y_col_name)},
+        
+        # Linux paths
+        Linux = {
+          path_input <- str_c("~/mnt/private/studydata/match/chtc/", y_col_name)
+          path_models <- str_c("~/mnt/private/studydata/match/models/", y_col_name)}
+)
+```
+
+Chunk Defaults
+```{r defaults}
+#| include: false
+
+knitr::opts_chunk$set(attr.output='style="max-height: 500px;"')
+
+options(tibble.width = Inf)
+options(tibble.print_max = Inf)
+```
+
+### Script Functions
+
+Function to fit, predict, and calc metrics and preds
+```{r function_2}
+fit_predict_eval <- function(split_num, splits, configs_best){
+  
+  d_in <- training(splits$splits[[split_num]]) |> 
+    select(-id_obs)
+  d_out <- testing(splits$splits[[split_num]])
+  
+  config_best <- configs_best |> 
+    slice(split_num) |> 
+    rename(n_jobs_in = n_jobs, 
+           roc_auc_in = roc_auc,
+           n_tx_in = n_tx)
+  
+  rec <- build_recipe(d = d_in, config = config_best)
+  rec_prepped <- rec |> 
+    prep(training = d_in, strings_as_factors = FALSE)
+  
+  feat_in <- rec_prepped |> 
+    bake(new_data = NULL)
+  
+  model_best <- fit_best_model(best_model = config_best, 
+                               feat = feat_in, 
+                               ml_mode = "classification")
+  
+  feat_out <- rec_prepped |> 
+    bake(new_data = d_out)   # no id_obs because not included in d_in
+  
+  # metrics from raw (uncalibrated) predictions for held out fold
+  preds_prob <- predict(model_best, feat_out,
+                        type = "prob")
+  preds_class <- predict(model_best, feat_out, type = "class")$.pred_class
+  
+  roc <- tibble(truth = feat_out$y, 
+                prob = preds_prob[[str_c(".pred_", y_level_pos)]]) %>% 
+    roc_auc(prob, truth = truth, event_level = "first") %>% 
+    select(metric = .metric, 
+           estimate = .estimate)
+  
+  cm <- tibble(truth = feat_out$y, estimate = preds_class) %>% 
+    conf_mat(truth, estimate)
+  
+  metrics_out <- cm |> 
+    summary(event_level = "first") |>   
+    select(metric = .metric,
+           estimate = .estimate) |> 
+    filter(metric %in% c("sens", "spec", "ppv", "npv", "accuracy", "bal_accuracy")) |> 
+    suppressWarnings() |>  # warning not about metrics we are returning
+    bind_rows(roc) |> 
+    pivot_wider(names_from = "metric", values_from = "estimate") |>    
+    relocate(roc_auc, sens, spec, ppv, npv, accuracy, bal_accuracy) |> 
+    bind_cols(config_best) |>
+    relocate(outer_split_num, algorithm, feature_set, hp1, hp2, hp3, 
+             resample) 
+  
+  # combine raw and calibrated probs
+  probs_out <- tibble(id_obs = d_out$id_obs,
+                      outer_split_num = rep(split_num, nrow(preds_prob)),
+                      prob_raw = preds_prob[[str_c(".pred_", y_level_pos)]],
+                      label = d_out$y) 
+  
+  return(list(probs_out = probs_out, 
+              metrics_out = metrics_out))
+}
+```
+
+### Read in aggregate CHTC metrics for inner folds
+```{r read_inner_metrics}
+metrics_raw <- 
+  read_csv(file.path(path_models, 
+                     str_c("inner_metrics_", version, "_", cv, ".csv"))) |> 
+  glimpse()
+```
+
+### Identify best config for each outer fold (i.e., across inner folds)
+
+Average metrics for each configuration across inner folds for each outer fold
+```{r best_model_1}
+metrics_avg <- metrics_raw |> 
+  group_by(outer_split_num, algorithm, feature_set, 
+           hp1, hp2, hp3, resample) |> 
+  summarize(across(c(roc_auc, n_tx),
+                   median),
+            n_jobs = n(), .groups = "drop") |> 
+  relocate(outer_split_num, n_jobs) |> 
+  arrange(outer_split_num, desc(roc_auc))
+
+```
+
+Best configuration for each outer fold
+```{r best_model_2}
+configs_best <- metrics_avg |> 
+  filter(n_tx >= 50) |> 
+  group_by(outer_split_num) |> 
+  arrange(desc(roc_auc)) |> 
+  slice(1) |> 
+  ungroup() 
+
+configs_best |> print_kbl()
+
+```
+
+```{r}
+configs_best |> pull(roc_auc) |> mean()
+configs_best |> pull(roc_auc) |> median()
+```
+
+```{r}
+configs_best |> 
+  ggplot(aes(x = roc_auc)) +
+  geom_histogram(bins = 10)
+```
+
+### Fit best model for each outer fold and get/save metrics and preds
+
+Get data from ANY batch (all same) and make splits
+
+ASSUMPTIONS: 
+
+* Data are same for all batches
+* format_data() is same for all batches
+* Assumes full recipe for all algorithms is present in all training controls with branches/ifs to select proper algorithm specific steps
+
+Map over all outer splits to get predicted probabilities, metrics, and SHAPs from held out outer folds.  Then save predicted probs, metrics, and SHAPs
+
+NOTE: Delete `outer_metrics_*` or this code chunk won't run!
+```{r eval_outer_folds}
+if(!file.exists(file.path(path_models, str_c("outer_metrics_", version, "_", 
+                                             cv, ".rds")))){ 
+  
+  # can source any training control given assumptions above
+  batch_names <- list.dirs(path_input, full.names = FALSE, recursive = FALSE) 
+  
+  batch_names <- batch_names[str_detect(batch_names, "train") & 
+                               str_detect(batch_names, cv) &
+                               str_detect(batch_names, version)] 
+  
+  batch_name <- batch_names[1]
+  
+  path_batch <- file.path(path_input, batch_name)
+  source(file.path(path_batch, "input", "training_controls.R"))
+  source(file.path(path_batch, "input", "fun_chtc.R"))
+  # NOTE: training controls overwrites path_batch but it matches   
+  
+  d <- read_csv(file.path(path_batch, "input", "data_trn.csv"), 
+                show_col_types = FALSE) 
+  
+  subids <- d$subid
+  
+  d <- format_data(d) |> 
+    mutate(id_obs = subids)
+  
+  rm(subids)
+  
+  splits <- d %>% 
+    make_splits(cv_resample_type, cv_resample, cv_outer_resample, 
+                cv_inner_resample, cv_group, seed_splits)
+  
+  all <- configs_best$outer_split_num |> 
+    map(\(split_num) fit_predict_eval(split_num, splits, configs_best))  
+  
+  
+  rm(splits)  # save a bit of memory!
+  
+  write_csv(tibble(stage = "metrics_save",
+                   outer_split_num = NA, 
+                   start_time = Sys.time()),
+            file.path(path_models, str_c("tmp_metrics_outer_progress_", version)),
+            append = TRUE)
+  metrics_out <- all |> 
+    map(\(l) pluck(l, "metrics_out")) |> 
+    list_rbind() |> 
+    write_rds(file.path(path_models, str_c("outer_metrics_", 
+                                           version, "_", 
+                                           cv, ".rds")))
+  write_csv(tibble(stage = "probs_save",
+                   outer_split_num = NA, 
+                   start_time = Sys.time()),
+            file.path(path_models, str_c("tmp_metrics_outer_progress_", version)),
+            append = TRUE)  
+  probs_out <- all |> 
+    map(\(l) pluck(l, "probs_out")) |> 
+    list_rbind() |> 
+    write_rds(file.path(path_models, str_c("outer_preds_", 
+                                           version, "_", 
+                                           cv, ".rds")))
+  
+} else {
+  message("Resampled performance from nested CV previously calculated")
+  
+  metrics_out <- read_rds(file.path(path_models, str_c("outer_metrics_", 
+                                                       version, "_", 
+                                                       cv, ".rds")))
+  
+}
+```
+
+
+### Final Review performance eval from outer loop
+
+Done more in depth later script but here is a quick look
+```{r print_metrics}
+metrics_out |> 
+  print_kbl()
+
+metrics_out |> 
+  summarize(median(roc_auc), mean(roc_auc), min(roc_auc), max(roc_auc))
+
+metrics_out |> 
+  ggplot(aes(x = roc_auc)) +
+  geom_histogram(bins = 10)
+```
+
+```{r}
+# delete tracking file
+if(file.exists(file.path(path_models, str_c("tmp_metrics_outer_progress_", version)))) {
+  file.remove(file.path(path_models, str_c("tmp_metrics_outer_progress_", version)))
+}
+```
+
+IMPORTANT:  We still need to select ONE final best config using the inner resampling approach AND then we need to fit that best config to ALL the data.
+
+
