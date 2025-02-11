@@ -81,7 +81,7 @@ algorithm <- "glmnet"
 ml_mode <- "classification"
 
 # alpha (mixture)
-hp1_glmnet <- c(0.05, seq(.1, 1, length.out = 10)) 
+hp1_glmnet <- c(0, seq(.1, 1, length.out = 10)) 
 
 # lambda (penalty)
 hp2_glmnet_min <- -8 # min for penalty grid - will be passed into exp(seq(min, max, length.out = out))
