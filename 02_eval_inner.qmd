@@ -86,7 +86,7 @@ Save average metrics file
 ```{r}
 metrics_avg |> 
   arrange(outer_split_num, inner_split_num, hp1, hp2) |> 
-  readr::write_csv(file.path(, "metrics_inner_avg.csv"))
+  readr::write_csv("metrics_inner_avg.csv")
 ```
 
 ## Plot hyperparameters
