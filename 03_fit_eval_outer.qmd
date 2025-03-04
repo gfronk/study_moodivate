@@ -1,0 +1,142 @@
+---
+title: "Analysis Workflow Step 3: Fit & evaluate models in outer loop"
+author: "Gaylen Fronk"
+format: html
+---
+
+## Setup
+
+Load libraries
+```{r}
+library(glmnet)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(readr)
+library(purrr)
+library(furrr)
+library(parsnip)
+library(recipes)
+library(tune)
+library(yardstick)
+library(rsample)
+```
+
+Source functions file
+```{r}
+source("fun_moodivate.R")
+```
+
+Function to fit, predict, and calc metrics and preds
+```{r function_2}
+fit_predict_eval <- function(split_num, splits, configs_best){
+  
+  d_in <- training(splits$splits[[split_num]]) |> 
+    select(-id_obs)
+  d_out <- testing(splits$splits[[split_num]])
+  
+  config_best <- configs_best |> 
+    slice(split_num) |> 
+    rename(n_jobs_in = n_jobs, 
+           roc_auc_in = roc_auc,
+           n_tx_in = n_tx)
+  
+  rec <- build_recipe(d = d_in, config = config_best)
+  rec_prepped <- rec |> 
+    prep(training = d_in, strings_as_factors = FALSE)
+  
+  feat_in <- rec_prepped |> 
+    bake(new_data = NULL)
+  
+  model_best <- fit_best_model(best_model = config_best, 
+                               feat = feat_in, 
+                               ml_mode = "classification")
+  
+  feat_out <- rec_prepped |> 
+    bake(new_data = d_out)
+  
+  # metrics from raw (uncalibrated) predictions for held out fold
+  preds_prob <- predict(model_best, feat_out,
+                        type = "prob")
+  preds_class <- predict(model_best, feat_out, type = "class")$.pred_class
+  
+  roc <- tibble(truth = feat_out$y, 
+                prob = preds_prob[[str_c(".pred_", y_level_pos)]]) %>% 
+    roc_auc(prob, truth = truth, event_level = "first") %>% 
+    select(metric = .metric, 
+           estimate = .estimate)
+  
+  cm <- tibble(truth = feat_out$y, estimate = preds_class) %>% 
+    conf_mat(truth, estimate)
+  
+  metrics_out <- cm |> 
+    summary(event_level = "first") |>   
+    select(metric = .metric,
+           estimate = .estimate) |> 
+    filter(metric %in% c("sens", "spec", "ppv", 
+                         "npv", "accuracy", "bal_accuracy")) |> 
+    suppressWarnings() |>  # warning not about metrics we are returning
+    bind_rows(roc) |> 
+    pivot_wider(names_from = "metric", values_from = "estimate") |>    
+    relocate(roc_auc, sens, spec, ppv, npv, accuracy, bal_accuracy) |> 
+    bind_cols(config_best) |>
+    relocate(outer_split_num, algorithm, feature_set, hp1, hp2, hp3, 
+             resample) 
+  
+  # combine raw and calibrated probs
+  probs_out <- tibble(id_obs = d_out$id_obs,
+                      outer_split_num = rep(split_num, nrow(preds_prob)),
+                      prob_raw = preds_prob[[str_c(".pred_", y_level_pos)]],
+                      label = d_out$y) 
+  
+  return(list(probs_out = probs_out, 
+              metrics_out = metrics_out))
+}
+```
+
+## Read in data
+
+```{r}
+d <- read_csv("S:/Projects/Dahne_J/Grants/2024-10_SteppedCare/development/data/toy_data.csv", show_col_types = FALSE)
+```
+
+Set up outcome variable levels
+```{r}
+y_col_name <- "bdi_outcome"
+y_level_pos <- "responder"
+y_level_neg <- "non_responder"
+```
+
+Clean/prep as needed (class variables, set factor levels)
+```{r}
+d <- d |> 
+  # rename outcome to y
+  rename(y = !!y_col_name) |> 
+  mutate(y = case_when(
+                       y == 0 ~ "non_responder",
+                       y == 1 ~ "responder",
+                       TRUE ~ NA_character_)) %>% 
+  # y as a factor with two intuitive levels
+  mutate(y = factor(y, levels = c(!!y_level_pos,
+                                  !!y_level_neg))) 
+
+
+```
+
+## Divide data (nested CV)
+
+Set cross-validation parameters
+```{r}
+cv_resample_type <- "nested"
+cv_outer_resample <- "3_x_10"
+cv_inner_resample <- "1_x_10"
+seed_splits <- 52592
+```
+
+Make splits (from fun_moodivate.R)
+```{r}
+splits <- d |> 
+  make_splits(cv_resample_type, cv_resample, cv_outer_resample,
+              cv_inner_resample, the_seed = seed_splits)
+```
+
