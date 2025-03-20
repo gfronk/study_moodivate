@@ -151,5 +151,106 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type, hp2_glmne
     
     return(results)
   }
+}
+
+
+fit_best_model <- function(best_model, feat, ml_mode, algorithm) {
   
+  
+  if (str_detect(algorithm, "glmnet")) {
+    
+    # backward compatible for tune controls that didnt set family 
+    if (!exists("glm_family")) glm_family <- if_else(ml_mode == "regression", "gaussian", "binomial")
+    
+    if (ml_mode == "classification") {
+      fit_best <- logistic_reg(penalty = best_model$hp2,
+                               mixture = best_model$hp1) %>%
+        set_engine("glmnet", family = glm_family) %>%
+        set_mode(ml_mode) %>%
+        fit(y ~ ., data = feat)
+    } else {
+      fit_best <- linear_reg(penalty = best_model$hp2,
+                             mixture = best_model$hp1) %>%
+        set_engine("glmnet", family = glm_family) %>%
+        set_mode(ml_mode) %>%
+        fit(y ~ ., data = feat)     
+    }
+    
+    return(fit_best)
+  }
+}
+
+fit_predict_eval <- function(split_num, splits, configs_best){
+  
+  d_in <- training(splits$splits[[split_num]]) |> 
+    select(-id_obs)
+  d_out <- testing(splits$splits[[split_num]])
+  
+  config_best <- configs_best |> 
+    slice(split_num) |> 
+    rename(n_jobs_in = n_jobs, 
+           roc_auc_in = roc_auc,
+           sens_in = sens,
+           spec_in = spec,
+           ppv_in = ppv,
+           npv_in = npv,
+           accuracy_in = accuracy)
+  
+  rec <- recipe(y ~ ., data = d_in) |> 
+    step_rm(record_id) |>
+    # standardize features, required for glmnet for weighting
+    step_normalize(all_predictors()) |> 
+    # remove near-zero-variance features
+    step_nzv(all_predictors())
+  rec_prepped <- rec |> 
+    prep(training = d_in, strings_as_factors = FALSE)
+  
+  feat_in <- rec_prepped |> 
+    bake(new_data = NULL)
+  
+  model_best <- fit_best_model(best_model = config_best, 
+                               feat = feat_in, 
+                               ml_mode = "classification",
+                               algorithm = "glmnet")
+  
+  feat_out <- rec_prepped |> 
+    bake(new_data = d_out)
+  
+  # metrics from raw (uncalibrated) predictions for held out fold
+  preds_prob <- predict(model_best, feat_out,
+                        type = "prob")
+  preds_class <- predict(model_best, feat_out, 
+                         type = "class")$.pred_class
+  
+  roc <- tibble(truth = feat_out$y, 
+                prob = preds_prob[[str_c(".pred_", y_level_pos)]]) %>% 
+    roc_auc(prob, truth = truth, event_level = "first") %>% 
+    select(metric = .metric, 
+           estimate = .estimate)
+  
+  cm <- tibble(truth = feat_out$y, estimate = preds_class) %>% 
+    conf_mat(truth, estimate)
+  
+  metrics_out <- cm |> 
+    summary(event_level = "first") |>   
+    select(metric = .metric,
+           estimate = .estimate) |> 
+    filter(metric %in% c("sens", "spec", "ppv", 
+                         "npv", "accuracy")) |> 
+    suppressWarnings() |>  # warning not about metrics we are returning
+    bind_rows(roc) |> 
+    pivot_wider(names_from = "metric", values_from = "estimate") |>    
+    relocate(roc_auc, sens, spec, ppv, npv, accuracy) |> 
+    bind_cols(config_best) |>
+    relocate(outer_split_num, hp1, hp2) 
+  
+  # combine raw and calibrated probs
+  probs_out <- tibble(id_obs = d_out$id_obs,
+                      outer_split_num = rep(split_num, nrow(preds_prob)),
+                      prob_raw = preds_prob[[str_c(".pred_",
+                                                   y_level_pos)]],
+                      label = d_out$y) 
+  
+  return(list(probs_out = probs_out, 
+              metrics_out = metrics_out))
 }
