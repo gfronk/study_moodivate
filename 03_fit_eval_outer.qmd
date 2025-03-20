@@ -8,18 +8,8 @@ format: html
 
 Load libraries
 ```{r}
-library(glmnet)
-library(dplyr)
-library(tidyr)
-library(stringr)
-library(readr)
-library(purrr)
-library(furrr)
-library(parsnip)
-library(recipes)
-library(tune)
-library(yardstick)
-library(rsample)
+library(tidyverse)
+library(tidymodels)
 ```
 
 Source functions file
@@ -27,77 +17,41 @@ Source functions file
 source("fun_moodivate.R")
 ```
 
-Function to fit, predict, and calc metrics and preds
-```{r function_2}
-fit_predict_eval <- function(split_num, splits, configs_best){
-  
-  d_in <- training(splits$splits[[split_num]]) |> 
-    select(-id_obs)
-  d_out <- testing(splits$splits[[split_num]])
-  
-  config_best <- configs_best |> 
-    slice(split_num) |> 
-    rename(n_jobs_in = n_jobs, 
-           roc_auc_in = roc_auc,
-           n_tx_in = n_tx)
-  
-  rec <- build_recipe(d = d_in, config = config_best)
-  rec_prepped <- rec |> 
-    prep(training = d_in, strings_as_factors = FALSE)
-  
-  feat_in <- rec_prepped |> 
-    bake(new_data = NULL)
-  
-  model_best <- fit_best_model(best_model = config_best, 
-                               feat = feat_in, 
-                               ml_mode = "classification")
-  
-  feat_out <- rec_prepped |> 
-    bake(new_data = d_out)
-  
-  # metrics from raw (uncalibrated) predictions for held out fold
-  preds_prob <- predict(model_best, feat_out,
-                        type = "prob")
-  preds_class <- predict(model_best, feat_out, type = "class")$.pred_class
-  
-  roc <- tibble(truth = feat_out$y, 
-                prob = preds_prob[[str_c(".pred_", y_level_pos)]]) %>% 
-    roc_auc(prob, truth = truth, event_level = "first") %>% 
-    select(metric = .metric, 
-           estimate = .estimate)
-  
-  cm <- tibble(truth = feat_out$y, estimate = preds_class) %>% 
-    conf_mat(truth, estimate)
-  
-  metrics_out <- cm |> 
-    summary(event_level = "first") |>   
-    select(metric = .metric,
-           estimate = .estimate) |> 
-    filter(metric %in% c("sens", "spec", "ppv", 
-                         "npv", "accuracy", "bal_accuracy")) |> 
-    suppressWarnings() |>  # warning not about metrics we are returning
-    bind_rows(roc) |> 
-    pivot_wider(names_from = "metric", values_from = "estimate") |>    
-    relocate(roc_auc, sens, spec, ppv, npv, accuracy, bal_accuracy) |> 
-    bind_cols(config_best) |>
-    relocate(outer_split_num, algorithm, feature_set, hp1, hp2, hp3, 
-             resample) 
-  
-  # combine raw and calibrated probs
-  probs_out <- tibble(id_obs = d_out$id_obs,
-                      outer_split_num = rep(split_num, nrow(preds_prob)),
-                      prob_raw = preds_prob[[str_c(".pred_", y_level_pos)]],
-                      label = d_out$y) 
-  
-  return(list(probs_out = probs_out, 
-              metrics_out = metrics_out))
-}
+## Read in average metrics
+
+```{r}
+metrics_avg <- read_csv("metrics_inner_avg_V2.csv", show_col_types = FALSE)
+```
+
+### Identify best configuration for each outer fold (i.e., across inner folds)
+
+Best configuration for each outer fold
+```{r best_model_2}
+configs_best <- metrics_avg |> 
+  group_by(outer_split_num) |> 
+  arrange(desc(roc_auc)) |> 
+  slice(1) |> 
+  ungroup() 
+
+configs_best |> print(n = Inf)
+
+```
+
+```{r}
+configs_best |> pull(roc_auc) |> mean()
+configs_best |> pull(roc_auc) |> median()
+```
+
+```{r}
+configs_best |> 
+  ggplot(aes(x = roc_auc)) +
+  geom_histogram(bins = 10)
 ```
 
 ## Read in data
 
 ```{r}
-d <- read_csv("S:/Projects/Dahne_J/Grants/2024-10_SteppedCare/development/data/toy_data.csv", show_col_types = FALSE)
+d <- read_csv(file.choose(), show_col_types = FALSE)
 ```
 
 Set up outcome variable levels
@@ -113,9 +67,9 @@ d <- d |>
   # rename outcome to y
   rename(y = !!y_col_name) |> 
   mutate(y = case_when(
-                       y == 0 ~ "non_responder",
-                       y == 1 ~ "responder",
-                       TRUE ~ NA_character_)) %>% 
+    y == 0 ~ "non_responder",
+    y == 1 ~ "responder",
+    TRUE ~ NA_character_)) %>% 
   # y as a factor with two intuitive levels
   mutate(y = factor(y, levels = c(!!y_level_pos,
                                   !!y_level_neg))) 
@@ -123,20 +77,138 @@ d <- d |>
 
 ```
 
-## Divide data (nested CV)
+## Fit outer loop models using best selected configurations
 
-Set cross-validation parameters
-```{r}
+```{r eval_outer_folds}
+
+record_ids <- d$record_id
+
+d <- d |> 
+  mutate(id_obs = record_id)
+
+rm(record_ids)
+
 cv_resample_type <- "nested"
 cv_outer_resample <- "3_x_10"
 cv_inner_resample <- "1_x_10"
 seed_splits <- 52592
-```
 
-Make splits (from fun_moodivate.R)
-```{r}
 splits <- d |> 
   make_splits(cv_resample_type, cv_resample, cv_outer_resample,
               cv_inner_resample, the_seed = seed_splits)
+
+all <- configs_best$outer_split_num |> 
+  map(\(split_num) fit_predict_eval(split_num, splits, configs_best))  
+
+
+rm(splits)  # save a bit of memory!
+
+metrics_out <- all |> 
+  map(\(l) pluck(l, "metrics_out")) |> 
+  list_rbind() |> 
+  write_rds("outer_metrics_V2.rds")
+
+preds_out <- all |> 
+  map(\(l) pluck(l, "probs_out")) |> 
+  list_rbind() |> 
+  write_rds("outer_preds_V2.rds")
 ```
 
+## Evaluate performance
+
+### Inner Loop AUC
+
+Best model configurations were selected using the median AUCs across 10 inner folds.  30 (3x10) models were selected.  
+
+```{r}
+metrics_out |> 
+  summarize(median(roc_auc_in), mean(roc_auc_in), 
+            min(roc_auc_in), max(roc_auc_in), sd(roc_auc_in))
+```
+
+### Outer AUC
+
+Best model configurations were evaluated using the AUCs from the 30 (3x10) outer folds
+
+Outer overall
+```{r metrics_out}
+metrics_out |> 
+  summarize(median(roc_auc), mean(roc_auc),
+            min(roc_auc), max(roc_auc), sd(roc_auc))
+```
+
+Side by side of inner & outer median AUCs
+```{r}
+metrics_out |> 
+  summarize(median(roc_auc), median(roc_auc_in),
+            mean(roc_auc), mean(roc_auc_in))
+```
+
+Plot outer folds
+```{r plot_outer}
+metrics_out |> 
+  ggplot(aes(x = roc_auc)) +
+  geom_histogram(bins = 10) 
+
+```
+
+### ROC curve
+This is single ROC by concatenating all outer folds.
+Could consider reporting this AUC though likely average of outer fold AUCs is more appropriate. Could also consider curves for each outer fold
+```{r roc_info}
+preds_out %>%
+  roc_auc(prob_raw, truth = label)
+
+roc_data <- preds_out %>%
+  roc_curve(prob_raw, truth = label)
+
+roc_data %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity, color = .threshold)) +
+  geom_path(linewidth = 2) +
+  geom_abline(lty = 3) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "False Positive Rate",
+       y = "True Positive Rate",
+       color = "Threshold") +
+  scale_x_continuous(breaks = seq(0,1,.25),
+    labels = sprintf("%.2f", seq(1,0,-.25))) +
+  scale_color_gradient(low="blue", high="red") +
+  theme(axis.text = element_text(size = rel(1.50)),
+        axis.title = element_text(size = rel(1.75)))
+```
+
+```{r}
+
+# rocs per fold
+roc_folds <- preds_out %>%
+  nest(.by = outer_split_num, .key = "preds") |> 
+  mutate(roc = map(preds, \(preds) roc_curve(preds, prob_raw, 
+                                             truth = label)))
+
+fig_roc_folds <- roc_data %>%  # plot region from full concatenated data 
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) + 
+  geom_abline(lty = 3) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "False Positive Rate",
+       y = "True Positive Rate") +
+  scale_x_continuous(breaks = seq(0,1,.25),
+                     labels = sprintf("%.2f", seq(1,0,-.25))) +
+  theme(axis.text = element_text(size = rel(1.25)),
+        axis.title = element_text(size = rel(1.5)))
+
+for (i in 1:nrow(roc_folds)) {
+  fig_roc_folds <- fig_roc_folds +
+    geom_path(data = roc_folds$roc[[i]],
+              mapping = aes(x = 1 - specificity, y = sensitivity),
+              color = "gray")
+}
+
+#add full concatenated curve
+fig_roc_folds +
+  geom_path(data = roc_data,
+            mapping = aes(x = 1 - specificity, y = sensitivity, color = .threshold),
+            linewidth = 2) +
+  scale_color_gradient(low="blue", high="red") +
+  labs(color = "Threshold",
+       x = "False Positive Rate")
+```
