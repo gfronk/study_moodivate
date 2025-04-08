@@ -8,7 +8,8 @@ make_splits <- function(d, cv_resample_type,
                         cv_outer_resample = NULL, 
                         cv_inner_resample = NULL, 
                         the_seed = NULL,
-                        cv_group = NULL) {
+                        cv_group = NULL,
+                        strata = NULL) {
   
   # d: (training) dataset to be resampled 
   # cv_resample_type: can be boot, kfold, or nested
@@ -33,7 +34,7 @@ make_splits <- function(d, cv_resample_type,
     n_folds <- as.numeric(str_remove(cv_resample, "\\d{1,3}_x_"))
     
       splits <- d %>% 
-        vfold_cv(v = n_folds, repeats = n_repeats) 
+        vfold_cv(v = n_folds, repeats = n_repeats, strata = all_of(strata)) 
   }
   
   
@@ -55,8 +56,10 @@ make_splits <- function(d, cv_resample_type,
     if (is.null(cv_group) & str_detect(cv_inner_resample, "_x_")) {
       
       splits <- d %>% 
-        nested_cv(outside = vfold_cv(v = outer_n_folds, repeats = outer_n_repeats) , 
-                  inside = vfold_cv(v = inner_n_folds, repeats = inner_n_repeats))
+        nested_cv(outside = vfold_cv(v = outer_n_folds, repeats = outer_n_repeats,
+                                     strata = all_of(strata)) , 
+                  inside = vfold_cv(v = inner_n_folds, repeats = inner_n_repeats,
+                                    strata = all_of(strata)))
     }
 
   }
@@ -87,8 +90,10 @@ make_rset <- function(splits, cv_resample_type, split_num = NULL,
   return(rset)
 }
 
-tune_model <- function(config, rec, splits, ml_mode, cv_resample_type, hp2_glmnet_min = NULL,
-                       hp2_glmnet_max = NULL, hp2_glmnet_out = NULL, y_level_pos = NULL) {
+tune_model <- function(config, rec, splits, ml_mode, cv_resample_type, 
+                       hp2_glmnet_min = NULL, hp2_glmnet_max = NULL, 
+                       hp2_glmnet_out = NULL, y_level_pos = NULL,
+                       penalty_weights = NULL) {
   # config: single-row config-specific tibble from jobs
   # splits: rset object that contains all resamples
   # rec: recipe (created manually or via build_recipe() function)
@@ -117,16 +122,31 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type, hp2_glmne
     if (!exists("glm_family")) glm_family <- if_else(ml_mode == "regression", "gaussian", "binomial")
     
     if (ml_mode == "classification") {
-      models <- logistic_reg(penalty = tune(),
-                             mixture = config$hp1) %>%
-        set_engine("glmnet", glm_family = glm_family) %>%
-        set_mode("classification") %>%
-        tune_grid(preprocessor = rec,
-                  resamples = split,
-                  grid = grid_penalty,
-                  # metrics assume that positive event it first level
-                  # make sure this is true in recipe
-                  metrics = mode_metrics)
+      if (is.null(penalty_weights)) {
+        models <- logistic_reg(penalty = tune(),
+                               mixture = config$hp1) %>%
+          set_engine("glmnet", glm_family = glm_family) %>%
+          set_mode("classification") %>%
+          tune_grid(preprocessor = rec,
+                    resamples = split,
+                    grid = grid_penalty,
+                    # metrics assume that positive event it first level
+                    # make sure this is true in recipe
+                    metrics = mode_metrics)
+      } else {
+        models <- logistic_reg(penalty = tune(),
+                               mixture = config$hp1) %>%
+          set_engine("glmnet", glm_family = glm_family,
+                     penalty.factor = penalty_weights) %>%
+          set_mode("classification") %>%
+          tune_grid(preprocessor = rec,
+                    resamples = split,
+                    grid = grid_penalty,
+                    # metrics assume that positive event it first level
+                    # make sure this is true in recipe
+                    metrics = mode_metrics)
+      }
+      
     } else {
       
       models <- linear_reg(penalty = tune(),
@@ -154,7 +174,8 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type, hp2_glmne
 }
 
 
-fit_best_model <- function(best_model, feat, ml_mode, algorithm) {
+fit_best_model <- function(best_model, feat, ml_mode, algorithm,
+                           penalty_weights = NULL) {
   
   
   if (str_detect(algorithm, "glmnet")) {
@@ -163,11 +184,21 @@ fit_best_model <- function(best_model, feat, ml_mode, algorithm) {
     if (!exists("glm_family")) glm_family <- if_else(ml_mode == "regression", "gaussian", "binomial")
     
     if (ml_mode == "classification") {
-      fit_best <- logistic_reg(penalty = best_model$hp2,
-                               mixture = best_model$hp1) %>%
-        set_engine("glmnet", family = glm_family) %>%
-        set_mode(ml_mode) %>%
-        fit(y ~ ., data = feat)
+      if (is.null(penalty_weights)) {
+        fit_best <- logistic_reg(penalty = best_model$hp2,
+                                 mixture = best_model$hp1) %>%
+          set_engine("glmnet", family = glm_family) %>%
+          set_mode(ml_mode) %>%
+          fit(y ~ ., data = feat)
+      } else {
+        fit_best <- logistic_reg(penalty = best_model$hp2,
+                                 mixture = best_model$hp1) %>%
+          set_engine("glmnet", family = glm_family,
+                     penalty.factor = penalty_weights) %>%
+          set_mode(ml_mode) %>%
+          fit(y ~ ., data = feat)
+      }
+      
     } else {
       fit_best <- linear_reg(penalty = best_model$hp2,
                              mixture = best_model$hp1) %>%
@@ -185,6 +216,11 @@ fit_predict_eval <- function(split_num, splits, configs_best){
   d_in <- training(splits$splits[[split_num]]) |> 
     select(-id_obs)
   d_out <- testing(splits$splits[[split_num]])
+  
+  penalty_weights <- c(0, rep(1, ncol(d_in) - 3))
+  # subtracting 3 for: 1) bdi_baseline (which now has penalty weight of 0, 
+  # first feature in dataset), 2) bdi_outcome (y), 3) record_id that gets 
+  # removed in recipe
   
   config_best <- configs_best |> 
     slice(split_num) |> 
@@ -211,7 +247,8 @@ fit_predict_eval <- function(split_num, splits, configs_best){
   model_best <- fit_best_model(best_model = config_best, 
                                feat = feat_in, 
                                ml_mode = "classification",
-                               algorithm = "glmnet")
+                               algorithm = "glmnet",
+                               penalty_weights = penalty_weights)
   
   feat_out <- rec_prepped |> 
     bake(new_data = d_out)
