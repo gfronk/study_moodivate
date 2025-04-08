@@ -7,7 +7,7 @@ format: html
 ## Setup
 
 Load libraries
-```{r}
+```{r, message = FALSE}
 library(tidyverse)
 library(tidymodels)
 ```
@@ -16,16 +16,27 @@ Source functions file
 ```{r}
 source("fun_moodivate.R")
 ```
+This functions file (fun_moodivate.R) contains many functions that are used throughout the Moodivate project analysis scripts. Functions split data, fit and evaluate models, and provide helper functionality for the modeling process. See all annotated code building functions within fun_moodivate.R.
+
+```{r defaults}
+#| include: false
+
+knitr::opts_chunk$set(attr.output='style="max-height: 500px;"')
+
+options(tibble.width = Inf)
+options(tibble.print_max = Inf)
+```
 
 ## Read in average metrics
 
 ```{r}
-metrics_avg <- read_csv("metrics_inner_avg_V2.csv", show_col_types = FALSE)
+metrics_avg <- read_csv("metrics_inner_avg.csv", 
+                        show_col_types = FALSE)
 ```
 
 ### Identify best configuration for each outer fold (i.e., across inner folds)
 
-Best configuration for each outer fold
+We select the best model configuration for each outer fold. Specifically, this is the model configuration that produces the highest average performance across *validation sets* (held-out inner folds). 
 ```{r best_model_2}
 configs_best <- metrics_avg |> 
   group_by(outer_split_num) |> 
@@ -36,6 +47,8 @@ configs_best <- metrics_avg |>
 configs_best |> print(n = Inf)
 
 ```
+
+Looking at the mean and median performance of the best selected models in the inner loop, we see that there is not quite normal distribution of auROC values. Importantly, we also see evidence of optimization bias that comes from selecting and evaluating models in the same data - model performance should be centered at 0.5 (chance performance) when we have broken any relationships in the data, but performance is slightly higher. This bias motivates our use of nested cross-validation, because models are *selected* and *evaluated* using different portions of the data.
 
 ```{r}
 configs_best |> pull(roc_auc) |> mean()
@@ -50,18 +63,26 @@ configs_best |>
 
 ## Read in data
 
+We continue to use our shuffled (i.e., randomized) dataset.
+
 ```{r}
-d <- read_csv(file.choose(), show_col_types = FALSE)
+d <- read_csv("~/Desktop/internship/moodivate/toy_data.csv", 
+              show_col_types = FALSE) |> 
+  glimpse()
 ```
 
-Set up outcome variable levels
+## Prepare data
+
+Following the same process as in script 01_fit_inner.qmd, we define our outcome variable (y_col_name) as `bdi_outcome`, which will be renamed as `y` to facilitate using cross-study functions and code. The two levels of the outcome variable (non-responder and responder) are set to have non-responder as the positive (event) level, as our goal is to identify non-responders to the Moodivate DMHI who should be stepped up to a higher level of care.
+
 ```{r}
 y_col_name <- "bdi_outcome"
-y_level_pos <- "responder"
-y_level_neg <- "non_responder"
+y_level_pos <- "non_responder"
+y_level_neg <- "responder"
 ```
 
-Clean/prep as needed (class variables, set factor levels)
+### Class variables & set factor levels
+
 ```{r}
 d <- d |> 
   # rename outcome to y
@@ -72,20 +93,25 @@ d <- d |>
     TRUE ~ NA_character_)) %>% 
   # y as a factor with two intuitive levels
   mutate(y = factor(y, levels = c(!!y_level_pos,
-                                  !!y_level_neg))) 
+                                  !!y_level_neg))) |> 
+  # move bdi_baseline to be first variable in dataset for penalty.factor
+  relocate(bdi_baseline) 
 
 
 ```
 
 ## Fit outer loop models using best selected configurations
 
+We follow the same model fitting process as in 01_fit_inner.qmd. The difference is that we are now fitting only the best selected model configuration in each set of held-in outer folds, and predicting into the corresponding held-out fold. 
+
+Note that data are divided identically using the same seed.
+
+Models are fit using `fit_predict_eval()` from fun_moodivate.R - this function fits the model and makes predictions. We map over each held-out outer fold to produce 30 *test set* estimates of model performance.
+
 ```{r eval_outer_folds}
-
 record_ids <- d$record_id
-
 d <- d |> 
   mutate(id_obs = record_id)
-
 rm(record_ids)
 
 cv_resample_type <- "nested"
@@ -100,51 +126,51 @@ splits <- d |>
 all <- configs_best$outer_split_num |> 
   map(\(split_num) fit_predict_eval(split_num, splits, configs_best))  
 
-
-rm(splits)  # save a bit of memory!
-
 metrics_out <- all |> 
   map(\(l) pluck(l, "metrics_out")) |> 
   list_rbind() |> 
-  write_rds("outer_metrics_V2.rds")
+  write_rds("outer_metrics.rds")
 
 preds_out <- all |> 
   map(\(l) pluck(l, "probs_out")) |> 
   list_rbind() |> 
-  write_rds("outer_preds_V2.rds")
+  write_rds("outer_preds.rds")
 ```
 
 ## Evaluate performance
 
 ### Inner Loop AUC
 
-Best model configurations were selected using the median AUCs across 10 inner folds.  30 (3x10) models were selected.  
+Best model configurations were selected using the median auROCs across 10 inner folds. 30 (3x10) models were selected. These performance estimates are from the inner folds (i.e., validation sets) and were used *only* for selection and not for evaluation.
 
 ```{r}
 metrics_out |> 
   summarize(median(roc_auc_in), mean(roc_auc_in), 
-            min(roc_auc_in), max(roc_auc_in), sd(roc_auc_in))
+            min(roc_auc_in), max(roc_auc_in), sd(roc_auc_in)) |> 
+  glimpse()
 ```
 
 ### Outer AUC
 
-Best model configurations were evaluated using the AUCs from the 30 (3x10) outer folds
+Best model configurations were evaluated using the auROCs from the 30 (3x10) outer folds (i.e., test sets). These performance metrics were used *only* for evaluation and not for selection. 
 
 Outer overall
 ```{r metrics_out}
 metrics_out |> 
   summarize(median(roc_auc), mean(roc_auc),
-            min(roc_auc), max(roc_auc), sd(roc_auc))
+            min(roc_auc), max(roc_auc), sd(roc_auc)) |> 
+  glimpse()
 ```
 
 Side by side of inner & outer median AUCs
 ```{r}
 metrics_out |> 
   summarize(median(roc_auc), median(roc_auc_in),
-            mean(roc_auc), mean(roc_auc_in))
+            mean(roc_auc), mean(roc_auc_in)) |> 
+  glimpse()
 ```
 
-Plot outer folds
+Plot outer fold auROCs
 ```{r plot_outer}
 metrics_out |> 
   ggplot(aes(x = roc_auc)) +
@@ -153,8 +179,10 @@ metrics_out |>
 ```
 
 ### ROC curve
-This is single ROC by concatenating all outer folds.
-Could consider reporting this AUC though likely average of outer fold AUCs is more appropriate. Could also consider curves for each outer fold
+
+This is single auROC by concatenating all outer folds.
+Could consider reporting this auROC though likely average of outer fold auROCs is more appropriate (and/or Bayesian posterior probability distributions). 
+
 ```{r roc_info}
 preds_out %>%
   roc_auc(prob_raw, truth = label)
@@ -177,6 +205,7 @@ roc_data %>%
         axis.title = element_text(size = rel(1.75)))
 ```
 
+Add individual outer fold auROC curves for visualization.
 ```{r}
 
 # rocs per fold
@@ -206,7 +235,8 @@ for (i in 1:nrow(roc_folds)) {
 #add full concatenated curve
 fig_roc_folds +
   geom_path(data = roc_data,
-            mapping = aes(x = 1 - specificity, y = sensitivity, color = .threshold),
+            mapping = aes(x = 1 - specificity, y = sensitivity, 
+                          color = .threshold),
             linewidth = 2) +
   scale_color_gradient(low="blue", high="red") +
   labs(color = "Threshold",

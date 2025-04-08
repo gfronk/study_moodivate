@@ -7,7 +7,7 @@ format: html
 ## Setup
 
 Load libraries
-```{r}
+```{r, message = FALSE}
 library(tidyverse)
 library(tidymodels)
 ```
@@ -16,8 +16,8 @@ Source functions file
 ```{r}
 source("fun_moodivate.R")
 ```
+This functions file (fun_moodivate.R) contains many functions that are used throughout the Moodivate project analysis scripts. Functions split data, fit and evaluate models, and provide helper functionality for the modeling process. See all annotated code building functions within fun_moodivate.R.
 
-Chunk defaults
 ```{r defaults}
 #| include: false
 
@@ -29,9 +29,10 @@ options(tibble.print_max = Inf)
 
 ## Read in data
 
-Results file from 01_fit_inner.qmd
+Read in results file ("results.csv") created in 01_fit_inner.qmd. This file contains one row per model configuration (unique combination of model tuning parameters) for each held-out fold. Each row contains the model configuration information (outer split number, inner split number, hp1 [alpha/mixture], and hp2 [lambda/penalty]). Each row also contains performance metrics for the model fit in the held-in data and evaluated in the indicated validation set (held-out fold from inner loop). 
+
 ```{r}
-results <- read_csv("results_V2.csv", show_col_types = FALSE) |> 
+results <- read_csv("results.csv", show_col_types = FALSE) |> 
   glimpse()
 ```
 
@@ -49,7 +50,7 @@ nrow(results)
 ```
 No duplicates
 
-Checks that breakdowns are as expected
+Checks that breakdowns are as expected. Should be equal numbers of each value.
 ```{r}
 results |> janitor::tabyl(outer_split_num) 
 results |> janitor::tabyl(inner_split_num) 
@@ -58,6 +59,8 @@ results |> janitor::tabyl(hp2)
 ```
 
 ## Median metrics across inner folds for model configurations
+
+This process groups by `outer_split_number`, `hp1`, and `hp2` such that each group contains the 10 inner held-out folds per unique combination of outer split number and tuning parameters. The `summarize()` function then averages model performance metrics across the 10 held-out folds (i.e., validation sets). Validation set performance will be used for **model selection** in script 03_fit_eval_outer.qmd. 
 
 ```{r}
 metrics_avg <- results |> 
@@ -71,7 +74,13 @@ metrics_avg <- results |>
   ungroup()
 ```
 
-Review
+### Review
+```{r}
+unique(metrics_avg$n_jobs)
+```
+
+The `n_jobs` variable should always be 10 jobs (10 inner held-out folds per combination of outer split number and tuning parameters). 
+
 ```{r}
 metrics_avg |> 
   slice(1:50) |> 
@@ -86,12 +95,14 @@ Save average metrics file
 ```{r}
 metrics_avg |> 
   arrange(outer_split_num, hp1, hp2) |> 
-  readr::write_csv("metrics_inner_avg_V2.csv")
+  readr::write_csv("metrics_inner_avg.csv")
 ```
 
-## Plot hyperparameters
+## Plot tuning parameters
 
+This plot shows performance as a function of alpha/mixture (`hp1`) and lambda/penalty (`hp2`). With shuffled data, there is no real pattern of performance as a function of tuning parameters, creating odd-looking output.
 
+With real data, we will confirm that the plot captures a peak (i.e., local maximum) in performance (auROC) before continuing to outer loop model fitting and evaluation. If performance is increasing toward one end of the range for either tuning parameter, we will **NOT** yet proceed to fitting and evaluating models in the outer loop (in 03_fit_eval_outer.qmd). First, we will add model configurations that expand the range, run those additional configurations in the inner loop, and re-evaluate model performance as a function of tuning parameters. 
 
 ```{r}
 plot_hp <- metrics_avg |> 
