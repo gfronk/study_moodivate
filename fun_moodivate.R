@@ -108,6 +108,16 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type,
                                sens, yardstick::spec, ppv, npv)
   }
   
+  if (config$feature_set == "thru_wk2") {
+    rec <- rec |> 
+      step_select(-ends_with("_wk3"), -ends_with("_wk4"))
+  }
+  
+  if (config$feature_set == "thru_wk3") {
+    rec <- rec |> 
+      step_select(-ends_with("_wk4"))
+  }
+  
   if (algorithm == "glmnet") {
     grid_penalty <- expand_grid(penalty = exp(seq(hp2_glmnet_min, hp2_glmnet_max, 
                                                   length.out = hp2_glmnet_out)))
@@ -211,7 +221,19 @@ fit_best_model <- function(best_model, feat, ml_mode, algorithm,
   }
 }
 
-fit_predict_eval <- function(split_num, splits, configs_best){
+fit_predict_eval <- function(config_num, splits, configs_best){
+  
+  config_best <- configs_best |> 
+    slice(config_num) |> 
+    rename(n_jobs_in = n_jobs, 
+           roc_auc_in = roc_auc,
+           sens_in = sens,
+           spec_in = spec,
+           ppv_in = ppv,
+           npv_in = npv,
+           accuracy_in = accuracy)
+  
+  split_num <- config_best$outer_split_num
   
   d_in <- training(splits$splits[[split_num]]) |> 
     select(-id_obs)
@@ -222,22 +244,23 @@ fit_predict_eval <- function(split_num, splits, configs_best){
   # first feature in dataset), 2) bdi_outcome (y), 3) record_id that gets 
   # removed in recipe
   
-  config_best <- configs_best |> 
-    slice(split_num) |> 
-    rename(n_jobs_in = n_jobs, 
-           roc_auc_in = roc_auc,
-           sens_in = sens,
-           spec_in = spec,
-           ppv_in = ppv,
-           npv_in = npv,
-           accuracy_in = accuracy)
-  
   rec <- recipe(y ~ ., data = d_in) |> 
     step_rm(record_id) |>
     # standardize features, required for glmnet for weighting
     step_normalize(all_predictors()) |> 
     # remove near-zero-variance features
     step_nzv(all_predictors())
+  
+  if (config_best$feature_set == "thru_wk2") {
+    rec <- rec |> 
+      step_select(-ends_with("_wk3"), -ends_with("_wk4"))
+  }
+  
+  if (config_best$feature_set == "thru_wk3") {
+    rec <- rec |> 
+      step_select(-ends_with("_wk4"))
+  }
+  
   rec_prepped <- rec |> 
     prep(training = d_in, strings_as_factors = FALSE)
   
@@ -284,6 +307,7 @@ fit_predict_eval <- function(split_num, splits, configs_best){
   # combine raw and calibrated probs
   probs_out <- tibble(id_obs = d_out$id_obs,
                       outer_split_num = rep(split_num, nrow(preds_prob)),
+                      feature_set = rep(config_best$feature_set, nrow(preds_prob)),
                       prob_raw = preds_prob[[str_c(".pred_",
                                                    y_level_pos)]],
                       label = d_out$y) 
