@@ -29,7 +29,7 @@ options(tibble.print_max = Inf)
 
 ## Read in data
 
-Read in results file ("results.csv") created in 01_fit_inner.qmd. This file contains one row per model configuration (unique combination of model tuning parameters) for each held-out fold. Each row contains the model configuration information (outer split number, inner split number, hp1 [alpha/mixture], and hp2 [lambda/penalty]). Each row also contains performance metrics for the model fit in the held-in data and evaluated in the indicated validation set (held-out fold from inner loop). 
+Read in results file ("results.csv") created in 01_fit_inner.qmd. This file contains one row per model configuration (unique combination of model tuning parameters and feature set) for each held-out fold. Each row contains the model configuration information (outer split number, inner split number, feature set, hp1 [alpha/mixture], and hp2 [lambda/penalty]). Each row also contains performance metrics for the model fit in the held-in data and evaluated in the indicated validation set (held-out fold from inner loop). 
 
 ```{r}
 results <- read_csv("results.csv", show_col_types = FALSE) |> 
@@ -43,7 +43,7 @@ Check for duplicates
 nrow(results)
 
 results <- results |> 
-  distinct(outer_split_num, inner_split_num, hp1, hp2,
+  distinct(outer_split_num, inner_split_num, feature_set, hp1, hp2,
            .keep_all = TRUE)
 
 nrow(results)
@@ -56,15 +56,16 @@ results |> janitor::tabyl(outer_split_num)
 results |> janitor::tabyl(inner_split_num) 
 results |> janitor::tabyl(hp1) 
 results |> janitor::tabyl(hp2) 
+results |> janitor::tabyl(feature_set)
 ```
 
 ## Median metrics across inner folds for model configurations
 
-This process groups by `outer_split_number`, `hp1`, and `hp2` such that each group contains the 10 inner held-out folds per unique combination of outer split number and tuning parameters. The `summarize()` function then averages model performance metrics across the 10 held-out folds (i.e., validation sets). Validation set performance will be used for **model selection** in script 03_fit_eval_outer.qmd. 
+This process groups by `outer_split_number`, `feature_set`, `hp1`, and `hp2` such that each group contains the 10 inner held-out folds per unique combination of outer split number, feature set, and tuning parameters. The `summarize()` function then averages model performance metrics across the 10 held-out folds (i.e., validation sets). Validation set performance will be used for **model selection** in script 03_fit_eval_outer.qmd. 
 
 ```{r}
 metrics_avg <- results |> 
-  group_by(outer_split_num, hp1, hp2) |> 
+  group_by(outer_split_num, feature_set, hp1, hp2) |> 
   summarize(across(c(accuracy, roc_auc,
                      sens, spec, ppv, npv),
                    median),
@@ -79,7 +80,7 @@ metrics_avg <- results |>
 unique(metrics_avg$n_jobs)
 ```
 
-The `n_jobs` variable should always be 10 jobs (10 inner held-out folds per combination of outer split number and tuning parameters). 
+The `n_jobs` variable should always be 10 jobs (10 inner held-out folds per combination of outer split number, feature set, and tuning parameters). 
 
 ```{r}
 metrics_avg |> 
@@ -100,23 +101,40 @@ metrics_avg |>
 
 ## Plot tuning parameters
 
-This plot shows performance as a function of alpha/mixture (`hp1`) and lambda/penalty (`hp2`). With shuffled data, there is no real pattern of performance as a function of tuning parameters, creating odd-looking output.
+This plot shows performance as a function of alpha/mixture (`hp1`) and lambda/penalty (`hp2`) separately for each `feature_set`. With shuffled data, there is no real pattern of performance as a function of tuning parameters, creating odd-looking output.
 
 With real data, we will confirm that the plot captures a peak (i.e., local maximum) in performance (auROC) before continuing to outer loop model fitting and evaluation. If performance is increasing toward one end of the range for either tuning parameter, we will **NOT** yet proceed to fitting and evaluating models in the outer loop (in 03_fit_eval_outer.qmd). First, we will add model configurations that expand the range, run those additional configurations in the inner loop, and re-evaluate model performance as a function of tuning parameters. 
 
 ```{r}
-plot_hp <- metrics_avg |> 
-  mutate(hp1 = factor(hp1, ordered = TRUE)) |> 
-  ggplot(mapping = aes(x = log(hp2),
-                       y = roc_auc,
-                       group = hp1,
-                       color = hp1)) +
-  geom_line() +
-  scale_color_discrete(name = "mixture (alpha)") +
-  labs(title = "Plotting performance by glmnet hyperparameters",
-       x = "penalty (lambda)",
-       y = "auROC")
+metrics_avg <- metrics_avg |> 
+  mutate(feature_set = case_when(
+    feature_set == "thru_wk2" ~ "Weeks 1 & 2",
+    feature_set == "thru_wk3" ~ "Weeks 1, 2, & 3",
+    feature_set == "thru_wk4" ~ "Weeks 1, 2, 3, & 4",
+    TRUE ~ NA_character_
+  ))
 
-plot_hp
+feature_sets <- unique(metrics_avg$feature_set) 
+
+for (i in feature_sets) {
+  
+  results_i <- metrics_avg %>% 
+    filter(feature_set == i)
+  
+  plot_title <- stringr::str_c("Plotting glmnet hyperparameters for models built from ", i)
+  
+  plot_i <- results_i %>%
+    mutate(hp1 = factor(hp1, ordered = TRUE)) %>% 
+    ggplot(mapping = aes(x = log(hp2), 
+                         y = roc_auc, 
+                         group = hp1, 
+                         color = hp1)) +
+    geom_line() +
+    scale_color_discrete(name = "mixture (alpha)") +
+    labs(title = plot_title, x = "penalty (lambda)", y = "auROC")
+  
+  print(plot_i)
+  
+}
 ```
 
