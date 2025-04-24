@@ -122,7 +122,7 @@ This recipe will be used in all model fitting. It will be developed using held-i
 ```{r}
 rec <- recipe(y ~ ., data = d) |> 
   step_rm(record_id) |> 
-  # standardize features, required for glmnet for weighting
+  # standardize features to have M=0, SD=1, required for glmnet for weighting
   step_normalize(all_predictors()) |> 
   # remove near-zero-variance features
   step_nzv(all_predictors())
@@ -130,7 +130,7 @@ rec <- recipe(y ~ ., data = d) |>
 
 ## Make configurations tibble
 
-This is a grid expansion of the splits and hyperparameters. Each row in the tibble will serve as a configuration that can then be fit below. This tibble will also be used to connect results to model configurations.
+This is a grid expansion of the splits, hyperparameters, and feature sets. Each row in the tibble will serve as a model configuration that can then be fit below. This tibble will also be used to connect results to model configurations.
 
 ### Extract CV parameters from strings
 
@@ -156,6 +156,7 @@ inner_split_num <- 1:(inner_n_repeats * inner_n_folds)
 ```{r}
 configs <- expand_grid(outer_split_num = outer_split_num,
                        inner_split_num = inner_split_num,
+                       feature_set = c("thru_wk2", "thru_wk3", "thru_wk4"),
                        hp1 = hp1_glmnet,
                        hp2 = NA_integer_) |> 
   tibble::rownames_to_column("config_num") |> 
@@ -163,6 +164,8 @@ configs <- expand_grid(outer_split_num = outer_split_num,
 
 glimpse(configs)
 ```
+
+Feature sets are specific combinations of features. Here, we are fitting models separately that use data from weeks 1 & 2, weeks 1 through 3, and weeks 1 through 4 so that we can examine the trade-off between model performance and duration of data collection required before making a decision. 
 
 Note that hp2 (lambda/penalty) is listed as NA because each configuration will `tune()` across the 100 values set using `hp2_glmnet_min`, `hp2_glmnet_max`, and `hp2_glmnet_out` (length). 
 
