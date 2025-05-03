@@ -61,6 +61,11 @@ d <- d |>
   # y as a factor with two levels, positive level first
   mutate(y = factor(y, levels = c(!!y_level_pos,
                                   !!y_level_neg))) |> 
+  # standardize naming
+  rename_with(~ str_replace(.x, "_w1", "_wk1")) |> 
+  rename_with(~ str_replace(.x, "_w2", "_wk2")) |> 
+  rename_with(~ str_replace(.x, "_w3", "_wk3")) |> 
+  rename_with(~ str_replace(.x, "_w4", "_wk4")) |> 
   # move bdi_baseline to be first variable in dataset for penalty.factor
   relocate(bdi_baseline) 
 
@@ -97,7 +102,9 @@ splits <- d |>
 
 We select our statistical algorithm, glmnet (elastic net regression), and "ml_mode" (classification vs. regression). 
 
-We define ranges for the two glmnet tuning parameters, alpha (mixture) and lambda (penalty). We also set a vector of penalty weights, which will apply equal penalty weighting to all variables except `bdi_baseline`, which will have a penalty weight of 0 and consequently will be included in all models.
+We define ranges for the two glmnet tuning parameters, alpha (mixture) and lambda (penalty). 
+
+We also set a vector of penalty weights, which will apply equal penalty weighting to all variables except `bdi_baseline`, which will have a penalty weight of 0 and consequently will be included in all models.
 ```{r}
 algorithm <- "glmnet"
 ml_mode <- "classification"
@@ -110,23 +117,17 @@ hp2_glmnet_min <- -8 # min for penalty grid - will be passed into exp(seq(min, m
 hp2_glmnet_max <- 2 # max for penalty grid
 hp2_glmnet_out <- 100 # length of penalty grid
 
-penalty_weights <- c(0, rep(1, ncol(d) - 3))
+# penalty_weights <- c(0, rep(1, ncol(d) - 3))
 # subtracting 3 for: 1) bdi_baseline (which now has penalty weight of 0, first feature in dataset), 2) bdi_outcome (y), 3) record_id that gets removed in recipe
 ```
 
 ### Build recipe
 
+NOW DONE WITHIN FUN_MOODIVATE.R - GEF update documentation
+
 The `tidymodels` ecosystem uses recipes to convert predictor variables into feature sets used for model inputs. We remove record_id (not a predictor variable, only a participant identifier), standardize all features (required for glmnet for equal weighting of features), and remove near-zero variance features. 
 
 This recipe will be used in all model fitting. It will be developed using held-in data and applied to held-out data (e.g., standardization values will be derived from held-in data). 
-```{r}
-rec <- recipe(y ~ ., data = d) |> 
-  step_rm(record_id) |> 
-  # standardize features to have M=0, SD=1, required for glmnet for weighting
-  step_normalize(all_predictors()) |> 
-  # remove near-zero-variance features
-  step_nzv(all_predictors())
-```
 
 ## Make configurations tibble
 
@@ -179,6 +180,16 @@ fit_eval <- function(config_current, configs, d, splits) {
   config <- configs |> 
     filter(config_num == config_current)
   
+  # build recipe
+  rec <- build_recipe(d = d, config = config)
+  
+  # create penalty_weights vector using feature set dimensions
+  feat <- rec |> 
+    prep(training = d, strings_as_factors = FALSE) |> 
+    bake(new_data = NULL) 
+  penalty_weights <- c(0, rep(1, ncol(feat) - 2))
+  rm(feat) 
+  
   # fit model & get predictions and model metrics
   results <- tune_model(config = config,
                         rec = rec, 
@@ -202,7 +213,7 @@ fit_eval <- function(config_current, configs, d, splits) {
 if (file.exists("results.csv")) {
   results <- read_csv("results.csv", show_col_types = F)
 } else {
-  results <- 1:max(configs$config_num) |> 
+  results <- 1:33 |> 
   map(\(config_current) fit_eval(config_current, configs, 
                                  d, splits)) |> 
   list_rbind() %>% 
