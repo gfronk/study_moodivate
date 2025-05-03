@@ -90,6 +90,27 @@ make_rset <- function(splits, cv_resample_type, split_num = NULL,
   return(rset)
 }
 
+build_recipe <- function(d, config) {
+  rec <- recipe(y ~ ., data = d) |> 
+    step_rm(record_id) |> 
+    # standardize features to have M=0, SD=1, required for glmnet for weighting
+    step_normalize(all_predictors()) |> 
+    # remove near-zero-variance features
+    step_nzv(all_predictors())
+  
+  if (config$feature_set == "thru_wk2") {
+    rec <- rec |> 
+      step_select(-ends_with("_wk3"), -ends_with("_wk4"))
+  }
+  
+  if (config$feature_set == "thru_wk3") {
+    rec <- rec |> 
+      step_select(-ends_with("_wk4"))
+  }
+  
+  return(rec)
+}
+
 tune_model <- function(config, rec, splits, ml_mode, cv_resample_type, 
                        hp2_glmnet_min = NULL, hp2_glmnet_max = NULL, 
                        hp2_glmnet_out = NULL, y_level_pos = NULL,
@@ -106,16 +127,6 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type,
   if (ml_mode == "classification") {
     mode_metrics <- metric_set(roc_auc, accuracy,
                                sens, yardstick::spec, ppv, npv)
-  }
-  
-  if (config$feature_set == "thru_wk2") {
-    rec <- rec |> 
-      step_select(-ends_with("_wk3"), -ends_with("_wk4"))
-  }
-  
-  if (config$feature_set == "thru_wk3") {
-    rec <- rec |> 
-      step_select(-ends_with("_wk4"))
   }
   
   if (algorithm == "glmnet") {
