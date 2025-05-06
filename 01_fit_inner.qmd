@@ -27,7 +27,7 @@ To create our shuffled dataset, we randomly sample (without replacement) **EVAN:
 
 * Breaks any relationship between the outcome and predictor variables
 
-* Maintains any possible relationships between predictor variables
+* Maintains any possible relationships among predictor variables
 
 * Maintains the exact data structure (variable types, outcome variable distribution, predictor variable distributions)
 
@@ -98,9 +98,7 @@ splits <- d |>
 
 ## Set up model configurations
 
-We define our statistical algorithm, "glmnet" (elastic net regression), and "ml_mode" (classification vs. regression). 
-
-We define ranges for the two glmnet tuning parameters, alpha (mixture, `hp1`) and lambda (penalty, `hp2`). 
+We define our statistical algorithm, "glmnet" (elastic net regression), and "ml_mode" (classification vs. regression). We define ranges for the two glmnet tuning parameters, alpha (mixture, `hp1`) and lambda (penalty, `hp2`). 
 
 ```{r}
 algorithm <- "glmnet"
@@ -114,14 +112,6 @@ hp2_glmnet_min <- -8 # min for penalty grid - will be passed into exp(seq(min, m
 hp2_glmnet_max <- 2 # max for penalty grid
 hp2_glmnet_out <- 100 # length of penalty grid
 ```
-
-### Build recipe
-
-NOW DONE WITHIN FUN_MOODIVATE.R - GEF update documentation
-
-The `tidymodels` ecosystem uses recipes to convert predictor variables into feature sets used for model inputs. We remove record_id (not a predictor variable, only a participant identifier), standardize all features (required for glmnet for equal weighting of features), and remove near-zero variance features. 
-
-This recipe will be used in all model fitting. It will be developed using held-in data and applied to held-out data (e.g., standardization values will be derived from held-in data). 
 
 ## Make configurations tibble
 
@@ -170,7 +160,7 @@ Set up wrapper function to `map()` over every model configuration (i.e., every r
 
 1. Filter down to only that configuration's row in the model configurations tibble.
 
-2. Build a recipe using the custom `build_recipe()` function (in fun_moodivate.R). This function defines a recipe, which is a set of processing steps to convert the raw data into the features that will serve as model inputs. Our recipe always contains the following generic steps: regress outcome variable `y` on all other variables, remove the `record_id` variable, standardize all variables to have a mean of 0 and standard deviation of 1 (required for the glmnet algorithm), and remove any near-zero-variance variables. Additionally, the recipe is adjusted based on the configuration's `feature_set` such that week 3 and week 4 data are removed as indicated. 
+2. Build a recipe using the custom `build_recipe()` function (in fun_moodivate.R). This function defines a recipe, which is a set of processing steps to convert the raw data into the features that will serve as model inputs. Our recipe always contains the following generic steps: regress outcome variable `y` on all other variables, remove the `record_id` variable, standardize all variables to have a mean of 0 and standard deviation of 1 (required for the glmnet algorithm), and remove any near-zero-variance variables. Additionally, the recipe is adjusted based on the configuration's `feature_set` such that week 3 and week 4 data are removed as indicated. It will be developed using held-in data and applied to held-out data (e.g., standardization values will be derived from held-in data).
 
 3. Define a vector of penalty weights, which will apply equal penalty weighting to all variables except `bdi_baseline`, which will have a penalty weight of 0 and consequently will be included in all models. The length of the `penalty_weights` vector is determined by the number of features in the feature set, so we temporarily build a feature set using our recipe (from step 2) to obtain the number of columns. We use the total number of columns minus 2 (1 for `bdi_baseline`, which already has a penalty weight of 1; and 1 for `y`, which is in the feature set but not counted as a predictor variable). 
 
