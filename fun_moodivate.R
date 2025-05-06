@@ -1,7 +1,6 @@
 # fun_moodivate.R
 
-# this script contains functions that are called 
-# in the moodivate analysis workflow (.qmd files)
+# this script contains functions that are called in the moodivate analysis workflow (.qmd files)
 
 make_splits <- function(d, cv_resample_type, 
                         cv_resample = NULL, 
@@ -13,9 +12,12 @@ make_splits <- function(d, cv_resample_type,
   
   # d: (training) dataset to be resampled 
   # cv_resample_type: can be boot, kfold, or nested
-  # resample: specifies for repeats and folds for CV (1_x_10; 10_x_10) or num splits for bootstrapping (100)
-  # inner_resample: specifies repeats/folds or num bootstrap splits for nested cv inner loop - same format as above
-  # outer_resample: specifies repeats/folds for outer nested cv loop - cannot use bootstrapping here
+  # cv_resample: specifies for repeats and folds for kfold CV (1_x_10; 10_x_10) or num splits for bootstrapping (100)
+  # cv_inner_resample: specifies repeats/folds or num bootstrap splits for nested cv inner loop - same format as above
+  # cv_outer_resample: specifies repeats/folds for outer nested cv loop - cannot use bootstrapping here
+  # the_seed: seed to ensure replication
+  # cv_group: grouping variable if doing grouped cross-validation (optional)
+  # strata: stratification variable (optional)
 
   if(is.null(the_seed)) {
     error("make_splits() requires a seed")
@@ -69,8 +71,7 @@ make_splits <- function(d, cv_resample_type,
 
 make_rset <- function(splits, cv_resample_type, split_num = NULL, 
                       inner_split_num = NULL, outer_split_num = NULL) {
-  # used to make an rset object that contains a single split for use in 
-  # tuning glmnet on CHTC  
+  # used to make an rset object that contains a single split for use in tuning glmnet 
   
   if (cv_resample_type == "nested") {
     split <- splits$inner_resamples[[outer_split_num]] %>% 
@@ -99,14 +100,18 @@ build_recipe <- function(d, config) {
     step_nzv(all_predictors())
   
   if (config$feature_set == "thru_wk2") {
+    # remove weeks 3 & 4 data for feature set "thru_wk2"
     rec <- rec |> 
       step_select(-ends_with("_wk3"), -ends_with("_wk4"))
   }
   
   if (config$feature_set == "thru_wk3") {
+    # remove week 4 data for feature set "thru_wk3"
     rec <- rec |> 
       step_select(-ends_with("_wk4"))
   }
+  
+  # no additional selection steps for feature set "thru_wk4" (all data used)
   
   return(rec)
 }
@@ -118,6 +123,11 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type,
   # config: single-row config-specific tibble from jobs
   # splits: rset object that contains all resamples
   # rec: recipe (created manually or via build_recipe() function)
+  # ml_mode: classification or regression
+  # cv_resample_type: nested, kfold, or boot
+  # hp2_*: min, max, and length of vector for hp2 (lambda/penalty) tuning parameter
+  # y_level_pos: positive (event) level for outcome variable y
+  # penalty_weights: (optional) vector of penalty weights if different weighting is desired across variables
   
   # set metrics for regression or classification
   if (ml_mode == "regression") {
@@ -197,7 +207,11 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type,
 
 fit_best_model <- function(best_model, feat, ml_mode, algorithm,
                            penalty_weights = NULL) {
-  
+  # best_model: single-row configuration selected based on inner loop model performance
+  # feat: feature set
+  # ml_mode: classification or regression
+  # algorithm: statistical algorithm (e.g., glmnet, xgboost)
+  # penalty_weights: (optional) vector of penalty weights if different weighting is desired across variables
   
   if (str_detect(algorithm, "glmnet")) {
     
@@ -233,6 +247,11 @@ fit_best_model <- function(best_model, feat, ml_mode, algorithm,
 }
 
 fit_predict_eval <- function(config_num, splits, configs_best){
+  
+  # config_num: current configuration number/row to slice configs tibble down to single configuration
+  # splits: rset object that contains all resamples
+  # configs_best: tibble of best selected model configurations
+  
   
   config_best <- configs_best |> 
     slice(config_num) |> 
