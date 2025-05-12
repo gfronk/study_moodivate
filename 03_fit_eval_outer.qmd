@@ -29,14 +29,17 @@ options(tibble.print_max = Inf)
 
 ## Read in average metrics
 
+Metrics averaged across inner folds (10 folds per average) for each unique model configuration (combination of feature set and two hyperparameters) for each outer fold (30 splits).
+
 ```{r}
 metrics_avg <- read_csv("metrics_inner_avg.csv", 
                         show_col_types = FALSE)
 ```
 
-### Identify best configuration for each outer fold (i.e., across inner folds)
+### Select best configurations
 
-We select the best model configuration for each outer fold for each feature set. Specifically, this is the model configuration that produces the highest average performance across *validation sets* (held-out inner folds). 
+We select the best model configuration for each outer fold for each feature set. Specifically, these are the model configurations that produce the highest average performance across *validation sets* (held-out inner folds) in each outer fold for each feature set. 
+
 ```{r best_model_2}
 configs_best <- metrics_avg |> 
   group_by(feature_set, outer_split_num) |> 
@@ -48,7 +51,7 @@ configs_best |> print(n = Inf)
 
 ```
 
-Looking at the mean and median performance of the best selected models in the inner loop, we see that there is not quite normal distribution of auROC values. Importantly, we also see evidence of optimization bias that comes from selecting and evaluating models in the same data - model performance should be centered at 0.5 (chance performance) when we have broken any relationships in the data, but performance is slightly higher. This bias motivates our use of nested cross-validation, because models are *selected* and *evaluated* using different portions of the data.
+Looking at the mean and median performance of the best selected models in the inner loop, we see that there is relatively normal distribution of auROC values (mean and median values are similar). Importantly, we also see evidence of *optimization bias* that comes from selecting and evaluating models in the same data - model performance should be centered at 0.5 (chance performance) when we have broken any relationships in the data, but performance is slightly higher. This optimization bias motivates our use of nested cross-validation, because models are *selected* and *evaluated* using different portions of the data.
 
 **Models using data from Weeks 1 & 2**
 
@@ -143,6 +146,11 @@ d <- d |>
   # y as a factor with two intuitive levels
   mutate(y = factor(y, levels = c(!!y_level_pos,
                                   !!y_level_neg))) |> 
+  # standardize naming
+  rename_with(~ str_replace(.x, "_w1", "_wk1")) |> 
+  rename_with(~ str_replace(.x, "_w2", "_wk2")) |> 
+  rename_with(~ str_replace(.x, "_w3", "_wk3")) |> 
+  rename_with(~ str_replace(.x, "_w4", "_wk4")) |>
   # move bdi_baseline to be first variable in dataset for penalty.factor
   relocate(bdi_baseline) 
 
@@ -158,11 +166,13 @@ Note that data are divided identically using the same seed.
 Models are fit using `fit_predict_eval()` from fun_moodivate.R - this function fits the model and makes predictions. We map over each held-out outer fold to produce 30 *test set* estimates of model performance.
 
 ```{r eval_outer_folds}
+# set up a temporary id number to track participants across fits
 record_ids <- d$record_id
 d <- d |> 
   mutate(id_obs = record_id)
 rm(record_ids)
 
+# set up cross-validation (identical splits as previous scripts)
 cv_resample_type <- "nested"
 cv_outer_resample <- "3_x_10"
 cv_inner_resample <- "1_x_10"
@@ -172,6 +182,7 @@ splits <- d |>
   make_splits(cv_resample_type, cv_resample, cv_outer_resample,
               cv_inner_resample, the_seed = seed_splits)
 
+# map function fit_predict_eval() across each row of configs_best
 all <- 1:nrow(configs_best) |> 
   map(\(config_num) fit_predict_eval(config_num, splits, configs_best))  
 
@@ -192,10 +203,11 @@ preds_out <- all |>
 
 ### Inner Loop AUC
 
-Best model configurations were selected using the median auROCs across 10 inner folds. 30 (3x10) models were selected. These performance estimates are from the inner folds (i.e., validation sets) and were used *only* for selection and not for evaluation.
+Best model configurations were selected using the median auROCs across 10 inner folds. 90 (3x10 for each of 3 feature sets) models were selected. These performance estimates are from the inner folds (i.e., validation sets) and were used *only* for selection and not for evaluation.
 
 ```{r}
 metrics_out |> 
+  group_by(feature_set) |> 
   summarize(median(roc_auc_in), mean(roc_auc_in), 
             min(roc_auc_in), max(roc_auc_in), sd(roc_auc_in)) |> 
   glimpse()
@@ -203,11 +215,12 @@ metrics_out |>
 
 ### Outer AUC
 
-Best model configurations were evaluated using the auROCs from the 30 (3x10) outer folds (i.e., test sets). These performance metrics were used *only* for evaluation and not for selection. 
+Best model configurations were evaluated using the auROCs from the 90 (3x10 for each of 3 feature sets) outer folds (i.e., test sets). These performance metrics were used *only* for evaluation and not for selection. 
 
 Outer overall
 ```{r metrics_out}
 metrics_out |> 
+  group_by(feature_set) |> 
   summarize(median(roc_auc), mean(roc_auc),
             min(roc_auc), max(roc_auc), sd(roc_auc)) |> 
   glimpse()
@@ -216,6 +229,7 @@ metrics_out |>
 Side by side of inner & outer median AUCs
 ```{r}
 metrics_out |> 
+  group_by(feature_set) |> 
   summarize(median(roc_auc), median(roc_auc_in),
             mean(roc_auc), mean(roc_auc_in)) |> 
   glimpse()
@@ -224,21 +238,27 @@ metrics_out |>
 Plot outer fold auROCs
 ```{r plot_outer}
 metrics_out |> 
-  ggplot(aes(x = roc_auc)) +
-  geom_histogram(bins = 10) 
+  ggplot(aes(x = roc_auc,
+             fill = feature_set)) +
+  geom_histogram(bins = 10)  +
+  facet_wrap(vars(feature_set), ncol = 1)
 
 ```
 
-### ROC curve
+### ROC curves
 
 This is single auROC by concatenating all outer folds.
 Could consider reporting this auROC though likely average of outer fold auROCs is more appropriate (and/or Bayesian posterior probability distributions). 
 
+#### Models built from weeks 1 & 2 data
+
 ```{r roc_info}
 preds_out %>%
+  filter(feature_set == "thru_wk2") |> 
   roc_auc(prob_raw, truth = label)
 
 roc_data <- preds_out %>%
+  filter(feature_set == "thru_wk2") |> 
   roc_curve(prob_raw, truth = label)
 
 roc_data %>%
@@ -261,6 +281,137 @@ Add individual outer fold auROC curves for visualization.
 
 # rocs per fold
 roc_folds <- preds_out %>%
+  filter(feature_set == "thru_wk2") |> 
+  nest(.by = outer_split_num, .key = "preds") |> 
+  mutate(roc = map(preds, \(preds) roc_curve(preds, prob_raw, 
+                                             truth = label)))
+
+fig_roc_folds <- roc_data %>%  # plot region from full concatenated data 
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) + 
+  geom_abline(lty = 3) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "False Positive Rate",
+       y = "True Positive Rate") +
+  scale_x_continuous(breaks = seq(0,1,.25),
+                     labels = sprintf("%.2f", seq(1,0,-.25))) +
+  theme(axis.text = element_text(size = rel(1.25)),
+        axis.title = element_text(size = rel(1.5)))
+
+for (i in 1:nrow(roc_folds)) {
+  fig_roc_folds <- fig_roc_folds +
+    geom_path(data = roc_folds$roc[[i]],
+              mapping = aes(x = 1 - specificity, y = sensitivity),
+              color = "gray")
+}
+
+#add full concatenated curve
+fig_roc_folds +
+  geom_path(data = roc_data,
+            mapping = aes(x = 1 - specificity, y = sensitivity, 
+                          color = .threshold),
+            linewidth = 2) +
+  scale_color_gradient(low="blue", high="red") +
+  labs(color = "Threshold",
+       x = "False Positive Rate")
+```
+
+#### Models built from weeks 1 - 3 data
+
+```{r roc_info}
+preds_out %>%
+  filter(feature_set == "thru_wk3") |> 
+  roc_auc(prob_raw, truth = label)
+
+roc_data <- preds_out %>%
+  filter(feature_set == "thru_wk3") |> 
+  roc_curve(prob_raw, truth = label)
+
+roc_data %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity, color = .threshold)) +
+  geom_path(linewidth = 2) +
+  geom_abline(lty = 3) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "False Positive Rate",
+       y = "True Positive Rate",
+       color = "Threshold") +
+  scale_x_continuous(breaks = seq(0,1,.25),
+                     labels = sprintf("%.2f", seq(1,0,-.25))) +
+  scale_color_gradient(low="blue", high="red") +
+  theme(axis.text = element_text(size = rel(1.50)),
+        axis.title = element_text(size = rel(1.75)))
+```
+
+Add individual outer fold auROC curves for visualization.
+```{r}
+
+# rocs per fold
+roc_folds <- preds_out %>%
+  filter(feature_set == "thru_wk3") |> 
+  nest(.by = outer_split_num, .key = "preds") |> 
+  mutate(roc = map(preds, \(preds) roc_curve(preds, prob_raw, 
+                                             truth = label)))
+
+fig_roc_folds <- roc_data %>%  # plot region from full concatenated data 
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) + 
+  geom_abline(lty = 3) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "False Positive Rate",
+       y = "True Positive Rate") +
+  scale_x_continuous(breaks = seq(0,1,.25),
+                     labels = sprintf("%.2f", seq(1,0,-.25))) +
+  theme(axis.text = element_text(size = rel(1.25)),
+        axis.title = element_text(size = rel(1.5)))
+
+for (i in 1:nrow(roc_folds)) {
+  fig_roc_folds <- fig_roc_folds +
+    geom_path(data = roc_folds$roc[[i]],
+              mapping = aes(x = 1 - specificity, y = sensitivity),
+              color = "gray")
+}
+
+#add full concatenated curve
+fig_roc_folds +
+  geom_path(data = roc_data,
+            mapping = aes(x = 1 - specificity, y = sensitivity, 
+                          color = .threshold),
+            linewidth = 2) +
+  scale_color_gradient(low="blue", high="red") +
+  labs(color = "Threshold",
+       x = "False Positive Rate")
+```
+
+#### Models built from weeks 1 - 4 data
+
+```{r roc_info}
+preds_out %>%
+  filter(feature_set == "thru_wk4") |> 
+  roc_auc(prob_raw, truth = label)
+
+roc_data <- preds_out %>%
+  filter(feature_set == "thru_wk4") |> 
+  roc_curve(prob_raw, truth = label)
+
+roc_data %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity, color = .threshold)) +
+  geom_path(linewidth = 2) +
+  geom_abline(lty = 3) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "False Positive Rate",
+       y = "True Positive Rate",
+       color = "Threshold") +
+  scale_x_continuous(breaks = seq(0,1,.25),
+                     labels = sprintf("%.2f", seq(1,0,-.25))) +
+  scale_color_gradient(low="blue", high="red") +
+  theme(axis.text = element_text(size = rel(1.50)),
+        axis.title = element_text(size = rel(1.75)))
+```
+
+Add individual outer fold auROC curves for visualization.
+```{r}
+
+# rocs per fold
+roc_folds <- preds_out %>%
+  filter(feature_set == "thru_wk4") |> 
   nest(.by = outer_split_num, .key = "preds") |> 
   mutate(roc = map(preds, \(preds) roc_curve(preds, prob_raw, 
                                              truth = label)))
