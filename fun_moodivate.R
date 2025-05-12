@@ -252,7 +252,6 @@ fit_predict_eval <- function(config_num, splits, configs_best){
   # splits: rset object that contains all resamples
   # configs_best: tibble of best selected model configurations
   
-  
   config_best <- configs_best |> 
     slice(config_num) |> 
     rename(n_jobs_in = n_jobs, 
@@ -268,11 +267,6 @@ fit_predict_eval <- function(config_num, splits, configs_best){
   d_in <- training(splits$splits[[split_num]]) |> 
     select(-id_obs)
   d_out <- testing(splits$splits[[split_num]])
-  
-  penalty_weights <- c(0, rep(1, ncol(d_in) - 3))
-  # subtracting 3 for: 1) bdi_baseline (which now has penalty weight of 0, 
-  # first feature in dataset), 2) bdi_outcome (y), 3) record_id that gets 
-  # removed in recipe
   
   rec <- recipe(y ~ ., data = d_in) |> 
     step_rm(record_id) |>
@@ -296,6 +290,9 @@ fit_predict_eval <- function(config_num, splits, configs_best){
   
   feat_in <- rec_prepped |> 
     bake(new_data = NULL)
+  
+  penalty_weights <- c(0, rep(1, ncol(feat_in) - 2))
+  # removing 2 columns - bdi_baseline (already captured with "0") and y
   
   model_best <- fit_best_model(best_model = config_best, 
                                feat = feat_in, 
