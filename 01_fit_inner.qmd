@@ -205,8 +205,9 @@ fit_eval <- function(config_current, configs, d, splits) {
 ### Fit models across all configurations
 
 ```{r}
-if (file.exists("results.csv")) {
-  results <- read_csv("results.csv", show_col_types = F)
+if (file.exists("~/Desktop/internship/moodivate/results.csv")) {
+  results <- read_csv("~/Desktop/internship/moodivate/results.csv",
+                      show_col_types = F)
 } else {
   results <- 1:max(configs$config_num) |> 
   map(\(config_current) fit_eval(config_current, configs, 
@@ -228,7 +229,7 @@ glimpse(results)
 Save results
 ```{r}
 results |> 
-  write_csv("results.csv")
+  write_csv("~/Desktop/internship/moodivate/results.csv")
 ```
 
 
