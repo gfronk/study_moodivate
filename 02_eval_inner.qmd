@@ -82,20 +82,52 @@ unique(metrics_avg$n_jobs)
 
 The `n_jobs` variable should always be 10 jobs (10 inner held-out folds per combination of outer split number, feature set, and tuning parameters). 
 
+**Performance: Through Week 2 Models**
+
 ```{r}
 metrics_avg |> 
+  filter(feature_set == "thru_wk2") |> 
   slice(1:50) |> 
   print()
 
 metrics_avg |> 
+  filter(feature_set == "thru_wk2") |> 
   pull(roc_auc) |> 
   hist()
 ```
 
-Save average metrics file
+**Performance: Through Week 3 Models**
+
 ```{r}
 metrics_avg |> 
-  arrange(outer_split_num, hp1, hp2) |> 
+  filter(feature_set == "thru_wk3") |> 
+  slice(1:50) |> 
+  print()
+
+metrics_avg |> 
+  filter(feature_set == "thru_wk3") |> 
+  pull(roc_auc) |> 
+  hist()
+```
+
+**Performance: Through Week 4 Models**
+
+```{r}
+metrics_avg |> 
+  filter(feature_set == "thru_wk4") |> 
+  slice(1:50) |> 
+  print()
+
+metrics_avg |> 
+  filter(feature_set == "thru_wk4") |> 
+  pull(roc_auc) |> 
+  hist()
+```
+
+Save average metrics file (all feature sets)
+```{r}
+metrics_avg |> 
+  arrange(outer_split_num, feature_set, hp1, hp2) |> 
   readr::write_csv("metrics_inner_avg.csv")
 ```
 
@@ -106,22 +138,23 @@ This plot shows performance as a function of alpha/mixture (`hp1`) and lambda/pe
 With real data, we will confirm that the plot captures a peak (i.e., local maximum) in performance (auROC) before continuing to outer loop model fitting and evaluation. If performance is increasing toward one end of the range for either tuning parameter, we will **NOT** yet proceed to fitting and evaluating models in the outer loop (in 03_fit_eval_outer.qmd). First, we will add model configurations that expand the range, run those additional configurations in the inner loop, and re-evaluate model performance as a function of tuning parameters. 
 
 ```{r}
-metrics_avg <- metrics_avg |> 
+metrics_plot <- metrics_avg |> 
   mutate(feature_set = case_when(
     feature_set == "thru_wk2" ~ "Weeks 1 & 2",
-    feature_set == "thru_wk3" ~ "Weeks 1, 2, & 3",
-    feature_set == "thru_wk4" ~ "Weeks 1, 2, 3, & 4",
+    feature_set == "thru_wk3" ~ "Weeks 1 - 3",
+    feature_set == "thru_wk4" ~ "Weeks 1 - 4",
     TRUE ~ NA_character_
   ))
 
-feature_sets <- unique(metrics_avg$feature_set) 
+feature_sets <- unique(metrics_plot$feature_set) 
 
 for (i in feature_sets) {
   
-  results_i <- metrics_avg %>% 
+  results_i <- metrics_plot %>% 
     filter(feature_set == i)
   
-  plot_title <- stringr::str_c("Plotting glmnet hyperparameters for models built from ", i)
+  plot_title <- stringr::str_c("Plotting glmnet hyperparameters for ", 
+                               i, " models")
   
   plot_i <- results_i %>%
     mutate(hp1 = factor(hp1, ordered = TRUE)) %>% 
