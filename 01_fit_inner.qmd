@@ -205,8 +205,10 @@ fit_eval <- function(config_current, configs, d, splits) {
 ### Fit models across all configurations
 
 ```{r}
-if (file.exists("~/Desktop/internship/moodivate/results.csv")) {
-  results <- read_csv("~/Desktop/internship/moodivate/results.csv",
+if (file.exists(str_c("~/Desktop/internship/moodivate/results_",
+                      cv_resample_type, ".csv"))) {
+  results <- read_csv(str_c("~/Desktop/internship/moodivate/results_",
+                      cv_resample_type, ".csv"),
                       show_col_types = F)
 } else {
   results <- 1:max(configs$config_num) |> 
@@ -229,7 +231,7 @@ glimpse(results)
 Save results
 ```{r}
 results |> 
-  write_csv("~/Desktop/internship/moodivate/results.csv")
+  write_csv(str_c("~/Desktop/internship/moodivate/results_", cv_resample_type, ".csv"))
 ```
 
 
