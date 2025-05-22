@@ -32,7 +32,11 @@ options(tibble.print_max = Inf)
 Read in results file ("results.csv") created in 01_fit_inner.qmd. This file contains one row per model configuration (unique combination of model tuning parameters and feature set) for each held-out fold. Each row contains the model configuration information (outer split number, inner split number, feature set, hp1 [alpha/mixture], and hp2 [lambda/penalty]). Each row also contains performance metrics for the model fit in the held-in data and evaluated in the indicated validation set (held-out fold from inner loop). 
 
 ```{r}
-results <- read_csv("results.csv", show_col_types = FALSE) |> 
+cv_resample_type <- "nested"
+
+results <- read_csv(str_c("~/Desktop/internship/moodivate/results_",
+                      cv_resample_type, ".csv"), 
+                    show_col_types = FALSE) |> 
   glimpse()
 ```
 
@@ -128,7 +132,7 @@ Save average metrics file (all feature sets)
 ```{r}
 metrics_avg |> 
   arrange(outer_split_num, feature_set, hp1, hp2) |> 
-  readr::write_csv("metrics_inner_avg.csv")
+  readr::write_csv("~/Desktop/internship/moodivate/metrics_inner_avg.csv")
 ```
 
 ## Plot tuning parameters
