@@ -32,8 +32,9 @@ options(tibble.print_max = Inf)
 Metrics averaged across inner folds (10 folds per average) for each unique model configuration (combination of feature set and two hyperparameters) for each outer fold (30 splits).
 
 ```{r}
-metrics_avg <- read_csv("metrics_inner_avg.csv", 
-                        show_col_types = FALSE)
+metrics_avg <- read_csv(
+  "~/Desktop/internship/moodivate/metrics_inner_avg.csv",
+  show_col_types = FALSE)
 ```
 
 ### Select best configurations
@@ -252,7 +253,7 @@ Could consider reporting this auROC though likely average of outer fold auROCs i
 
 #### Models built from weeks 1 & 2 data
 
-```{r roc_info}
+```{r roc_info_12}
 preds_out %>%
   filter(feature_set == "thru_wk2") |> 
   roc_auc(prob_raw, truth = label)
@@ -317,7 +318,7 @@ fig_roc_folds +
 
 #### Models built from weeks 1 - 3 data
 
-```{r roc_info}
+```{r roc_info_123}
 preds_out %>%
   filter(feature_set == "thru_wk3") |> 
   roc_auc(prob_raw, truth = label)
@@ -382,7 +383,7 @@ fig_roc_folds +
 
 #### Models built from weeks 1 - 4 data
 
-```{r roc_info}
+```{r roc_info_1234}
 preds_out %>%
   filter(feature_set == "thru_wk4") |> 
   roc_auc(prob_raw, truth = label)
