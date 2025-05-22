@@ -8,7 +8,7 @@
 
 <meta name="author" content="Gaylen Fronk">
 
-<title>Analysis Workflow Step 1: Fit and select in inner loops</title>
+<title>Analysis Workflow Step 4: Select &amp; fit final model</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -58,16 +58,16 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </style>
 
 
-<script src="01_fit_inner_files/libs/clipboard/clipboard.min.js"></script>
-<script src="01_fit_inner_files/libs/quarto-html/quarto.js"></script>
-<script src="01_fit_inner_files/libs/quarto-html/popper.min.js"></script>
-<script src="01_fit_inner_files/libs/quarto-html/tippy.umd.min.js"></script>
-<script src="01_fit_inner_files/libs/quarto-html/anchor.min.js"></script>
-<link href="01_fit_inner_files/libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="01_fit_inner_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
-<script src="01_fit_inner_files/libs/bootstrap/bootstrap.min.js"></script>
-<link href="01_fit_inner_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="01_fit_inner_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+<script src="04_fit_select_final_model_files/libs/clipboard/clipboard.min.js"></script>
+<script src="04_fit_select_final_model_files/libs/quarto-html/quarto.js"></script>
+<script src="04_fit_select_final_model_files/libs/quarto-html/popper.min.js"></script>
+<script src="04_fit_select_final_model_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="04_fit_select_final_model_files/libs/quarto-html/anchor.min.js"></script>
+<link href="04_fit_select_final_model_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="04_fit_select_final_model_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="04_fit_select_final_model_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="04_fit_select_final_model_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="04_fit_select_final_model_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
 
 
 </head>
@@ -80,7 +80,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">Analysis Workflow Step 1: Fit and select in inner loops</h1>
+<h1 class="title">Analysis Workflow Step 4: Select &amp; fit final model</h1>
 </div>
 
 
@@ -119,13 +119,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="read-in-data" class="level2">
 <h2 class="anchored" data-anchor-id="read-in-data">Read in data</h2>
-<p>To ensure all proposed analyses are feasible and to specify analysis steps as precisely as possible, <strong>we conduct our proposed analyses using a shuffled (i.e., randomized) version of our dataset</strong>. Following testing, our analyses will follow these scripts exactly using our real data.</p>
-<p>To create our shuffled dataset, we randomly sample (without replacement) <strong>EVAN: IS THIS TRUE?</strong> the outcome variable (<code>bdi_outcome</code>, which will later be renamed to <code>y</code>). This process:</p>
-<ul>
-<li><p>Breaks any relationship between the outcome and predictor variables</p></li>
-<li><p>Maintains any possible relationships among predictor variables</p></li>
-<li><p>Maintains the exact data structure (variable types, outcome variable distribution, predictor variable distributions)</p></li>
-</ul>
+<p>To ensure all proposed analyses are feasible and to specify analysis steps as precisely as possible, <strong>we continue to conduct our proposed analyses using a shuffled (i.e., randomized) version of our dataset</strong>. Following testing, our analyses will follow these scripts exactly using our real data.</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>d <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">"~/Desktop/internship/moodivate/toy_data.csv"</span>, </span>
 <span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>              <span class="at">show_col_types =</span> <span class="cn">FALSE</span>) <span class="sc">|&gt;</span> </span>
@@ -181,9 +175,9 @@ $ bdi_outcome             &lt;dbl&gt; 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 
 </section>
 <section id="prepare-data" class="level2">
 <h2 class="anchored" data-anchor-id="prepare-data">Prepare data</h2>
+<p>We prepare our data in the same way as all previous scripts.</p>
 <section id="set-up-outcome-variable-levels" class="level3">
 <h3 class="anchored" data-anchor-id="set-up-outcome-variable-levels">Set up outcome variable levels</h3>
-<p>We define our outcome variable (y_col_name) as <code>bdi_outcome</code>, which will be renamed as <code>y</code> to facilitate using cross-study functions and code. The two levels of the outcome variable (non-responder and responder) are set to have non-responder as the positive (event) level, as our goal is to identify non-responders to the Moodivate DMHI who should be stepped up to a higher level of care.</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>y_col_name <span class="ot">&lt;-</span> <span class="st">"bdi_outcome"</span></span>
 <span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>y_level_pos <span class="ot">&lt;-</span> <span class="st">"non_responder"</span></span>
@@ -197,9 +191,9 @@ $ bdi_outcome             &lt;dbl&gt; 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  <span class="co"># rename outcome to y</span></span>
 <span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">rename</span>(<span class="at">y =</span> <span class="sc">!!</span>y_col_name) <span class="sc">|&gt;</span> </span>
 <span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">y =</span> <span class="fu">case_when</span>(</span>
-<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>                       y <span class="sc">==</span> <span class="dv">0</span> <span class="sc">~</span> <span class="st">"non_responder"</span>,</span>
-<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>                       y <span class="sc">==</span> <span class="dv">1</span> <span class="sc">~</span> <span class="st">"responder"</span>,</span>
-<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>                       <span class="cn">TRUE</span> <span class="sc">~</span> <span class="cn">NA_character_</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>    y <span class="sc">==</span> <span class="dv">0</span> <span class="sc">~</span> <span class="st">"non_responder"</span>,</span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>    y <span class="sc">==</span> <span class="dv">1</span> <span class="sc">~</span> <span class="st">"responder"</span>,</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>    <span class="cn">TRUE</span> <span class="sc">~</span> <span class="cn">NA_character_</span>)) <span class="sc">%&gt;%</span> </span>
 <span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>  <span class="co"># y as a factor with two levels, positive level first</span></span>
 <span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">y =</span> <span class="fu">factor</span>(y, <span class="at">levels =</span> <span class="fu">c</span>(<span class="sc">!!</span>y_level_pos,</span>
 <span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>                                  <span class="sc">!!</span>y_level_neg))) <span class="sc">|&gt;</span> </span>
@@ -217,13 +211,11 @@ $ bdi_outcome             &lt;dbl&gt; 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 
 <h2 class="anchored" data-anchor-id="divide-data">Divide data</h2>
 <section id="set-cross-validation-parameters" class="level3">
 <h3 class="anchored" data-anchor-id="set-cross-validation-parameters">Set cross-validation parameters</h3>
-<p>We are using nested cross-validation, with three repeats of 10-fold CV in the outer loop and one repeat of 10-fold CV in the inner loop. We set a seed for replicability across scripts and across model runs.</p>
-<p>For more details on nested cross-validation, see <strong>GEF ADD KRSTAJIC PUB LINK HERE</strong>.</p>
+<p>Following nested cross-validation conducted in scripts 01-03, the final step is to fit and select models using the <em>inner loop CV</em> but in our <em>entire dataset</em>. Consequently, we use one repeat of 10-fold CV. Performance metrics from this round of CV will <strong>not</strong> be used for model evaluation; they will only be used for selecting a final model configuration.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>cv_resample_type <span class="ot">&lt;-</span> <span class="st">"nested"</span></span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>cv_outer_resample <span class="ot">&lt;-</span> <span class="st">"3_x_10"</span></span>
-<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>cv_inner_resample <span class="ot">&lt;-</span> <span class="st">"1_x_10"</span></span>
-<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>seed_splits <span class="ot">&lt;-</span> <span class="dv">52592</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>cv_resample_type <span class="ot">&lt;-</span> <span class="st">"kfold"</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>cv_resample <span class="ot">&lt;-</span> <span class="st">"1_x_10"</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>seed_splits <span class="ot">&lt;-</span> <span class="dv">111594</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </section>
 <section id="make-splits" class="level3">
@@ -239,7 +231,7 @@ $ bdi_outcome             &lt;dbl&gt; 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 
 </section>
 <section id="set-up-model-configurations" class="level2">
 <h2 class="anchored" data-anchor-id="set-up-model-configurations">Set up model configurations</h2>
-<p>We define our statistical algorithm, “glmnet” (elastic net regression), and “ml_mode” (classification vs.&nbsp;regression). We define ranges for the two glmnet tuning parameters, alpha (mixture, <code>hp1</code>) and lambda (penalty, <code>hp2</code>).</p>
+<p>Possible model configurations are defined identically to previous scripts 01-03.</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>algorithm <span class="ot">&lt;-</span> <span class="st">"glmnet"</span></span>
 <span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>ml_mode <span class="ot">&lt;-</span> <span class="st">"classification"</span></span>
@@ -259,42 +251,32 @@ $ bdi_outcome             &lt;dbl&gt; 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 
 <section id="extract-cv-parameters-from-strings" class="level3">
 <h3 class="anchored" data-anchor-id="extract-cv-parameters-from-strings">Extract CV parameters from strings</h3>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co"># outer cv loop</span></span>
-<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>outer_n_repeats <span class="ot">&lt;-</span> <span class="fu">as.numeric</span>(<span class="fu">str_remove</span>(cv_outer_resample,</span>
-<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>                                         <span class="st">"_x_</span><span class="sc">\\</span><span class="st">d{1,2}"</span>))</span>
-<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>outer_n_folds <span class="ot">&lt;-</span> <span class="fu">as.numeric</span>(<span class="fu">str_remove</span>(cv_outer_resample,</span>
-<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>                                       <span class="st">"</span><span class="sc">\\</span><span class="st">d{1,3}_x_"</span>))</span>
-<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>outer_split_num <span class="ot">&lt;-</span> <span class="dv">1</span><span class="sc">:</span>(outer_n_repeats <span class="sc">*</span> outer_n_folds)</span>
-<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a><span class="co"># inner cv loop</span></span>
-<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>inner_n_repeats <span class="ot">&lt;-</span> <span class="fu">as.numeric</span>(<span class="fu">str_remove</span>(cv_inner_resample,</span>
-<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>                                         <span class="st">"_x_</span><span class="sc">\\</span><span class="st">d{1,2}"</span>))</span>
-<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>inner_n_folds <span class="ot">&lt;-</span> <span class="fu">as.numeric</span>(<span class="fu">str_remove</span>(cv_inner_resample,</span>
-<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>                                       <span class="st">"</span><span class="sc">\\</span><span class="st">d{1,3}_x_"</span>))</span>
-<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>inner_split_num <span class="ot">&lt;-</span> <span class="dv">1</span><span class="sc">:</span>(inner_n_repeats <span class="sc">*</span> inner_n_folds)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>n_repeats <span class="ot">&lt;-</span> <span class="fu">as.numeric</span>(<span class="fu">str_remove</span>(cv_resample,</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>                                   <span class="st">"_x_</span><span class="sc">\\</span><span class="st">d{1,2}"</span>))</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>n_folds <span class="ot">&lt;-</span> <span class="fu">as.numeric</span>(<span class="fu">str_remove</span>(cv_resample,</span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>                                 <span class="st">"</span><span class="sc">\\</span><span class="st">d{1,3}_x_"</span>))</span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>split_num <span class="ot">&lt;-</span> <span class="dv">1</span><span class="sc">:</span>(n_repeats <span class="sc">*</span> n_folds)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </section>
 <section id="make-configurations-grid" class="level3">
 <h3 class="anchored" data-anchor-id="make-configurations-grid">Make configurations grid</h3>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>configs <span class="ot">&lt;-</span> <span class="fu">expand_grid</span>(<span class="at">outer_split_num =</span> outer_split_num,</span>
-<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>                       <span class="at">inner_split_num =</span> inner_split_num,</span>
-<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>                       <span class="at">feature_set =</span> <span class="fu">c</span>(<span class="st">"thru_wk2"</span>, <span class="st">"thru_wk3"</span>, <span class="st">"thru_wk4"</span>),</span>
-<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>                       <span class="at">hp1 =</span> hp1_glmnet,</span>
-<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>                       <span class="at">hp2 =</span> <span class="cn">NA_integer_</span>) <span class="sc">|&gt;</span> </span>
-<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>  tibble<span class="sc">::</span><span class="fu">rownames_to_column</span>(<span class="st">"config_num"</span>) <span class="sc">|&gt;</span> </span>
-<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">config_num =</span> <span class="fu">as.numeric</span>(config_num))</span>
-<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a><span class="fu">glimpse</span>(configs)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>configs <span class="ot">&lt;-</span> <span class="fu">expand_grid</span>(<span class="at">split_num =</span> split_num,</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>                       <span class="at">feature_set =</span> <span class="fu">c</span>(<span class="st">"thru_wk2"</span>, <span class="st">"thru_wk3"</span>, <span class="st">"thru_wk4"</span>),</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>                       <span class="at">hp1 =</span> hp1_glmnet,</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>                       <span class="at">hp2 =</span> <span class="cn">NA_integer_</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>  tibble<span class="sc">::</span><span class="fu">rownames_to_column</span>(<span class="st">"config_num"</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">config_num =</span> <span class="fu">as.numeric</span>(config_num))</span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a><span class="fu">glimpse</span>(configs)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>Rows: 9,900
-Columns: 6
-$ config_num      &lt;dbl&gt; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,…
-$ outer_split_num &lt;int&gt; 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, …
-$ inner_split_num &lt;int&gt; 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, …
-$ feature_set     &lt;chr&gt; "thru_wk2", "thru_wk2", "thru_wk2", "thru_wk2", "thru_…
-$ hp1             &lt;dbl&gt; 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,…
-$ hp2             &lt;int&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA…</code></pre>
+<pre><code>Rows: 330
+Columns: 5
+$ config_num  &lt;dbl&gt; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,…
+$ split_num   &lt;int&gt; 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1…
+$ feature_set &lt;chr&gt; "thru_wk2", "thru_wk2", "thru_wk2", "thru_wk2", "thru_wk2"…
+$ hp1         &lt;dbl&gt; 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 0.0…
+$ hp2         &lt;int&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA…</code></pre>
 </div>
 </div>
 <p>Feature sets are specific combinations of features. Here, we are fitting models separately that use data from weeks 1 &amp; 2, weeks 1 through 3, and weeks 1 through 4 so that we can examine the trade-off between model performance and duration of data collection required before making a decision.</p>
@@ -303,11 +285,11 @@ $ hp2             &lt;int&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA
 </section>
 <section id="fit-models" class="level2">
 <h2 class="anchored" data-anchor-id="fit-models">Fit models</h2>
-<p>Set up wrapper function to <code>map()</code> over every model configuration (i.e., every row in the configs tibble). For each model configuration, we:</p>
+<p>As in previous scripts, we set up a wrapper function to <code>map()</code> over every model configuration (i.e., every row in the configs tibble). For each model configuration, we:</p>
 <ol type="1">
 <li><p>Filter down to only that configuration’s row in the model configurations tibble.</p></li>
-<li><p>Build a recipe using the custom <code>build_recipe()</code> function (in fun_moodivate.R). This function defines a recipe, which is a set of processing steps to convert the raw data into the features that will serve as model inputs. Our recipe always contains the following generic steps: regress outcome variable <code>y</code> on all other variables, remove the <code>record_id</code> variable, standardize all variables to have a mean of 0 and standard deviation of 1 (required for the glmnet algorithm), and remove any near-zero-variance variables. Additionally, the recipe is adjusted based on the configuration’s <code>feature_set</code> such that week 3 and week 4 data are removed as indicated. It will be developed using held-in data and applied to held-out data (e.g., standardization values will be derived from held-in data).</p></li>
-<li><p>Define a vector of penalty weights, which will apply equal penalty weighting to all variables except <code>bdi_baseline</code>, which will have a penalty weight of 0 and consequently will be included in all models. The length of the <code>penalty_weights</code> vector is determined by the number of features in the feature set, so we temporarily build a feature set using our recipe (from step 2) to obtain the number of columns. We use the total number of columns minus 2 (1 for <code>bdi_baseline</code>, which already has a penalty weight of 1; and 1 for <code>y</code>, which is in the feature set but not counted as a predictor variable).</p></li>
+<li><p>Build a recipe using the custom <code>build_recipe()</code> function (in fun_moodivate.R).</p></li>
+<li><p>Define a vector of penalty weights, which will apply equal penalty weighting to all variables except <code>bdi_baseline</code>, which will have a penalty weight of 0 and consequently will be included in all models.</p></li>
 <li><p>Fit model, and get model performance metrics using our custom <code>tune_model()</code> from the fun_moodivate.R script. This function performs model tuning for the model configuration (defined by <code>feature_set</code>, <code>hp1</code>, and combination of inner and outer folds) across our range of values of <code>hp2</code>.</p></li>
 <li><p>Append model performance metrics to the configs tibble in a new <code>results</code> tibble.</p></li>
 </ol>
@@ -352,7 +334,7 @@ $ hp2             &lt;int&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA
 <span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>                      cv_resample_type, <span class="st">".csv"</span>),</span>
 <span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>                      <span class="at">show_col_types =</span> F)</span>
 <span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>} <span class="cf">else</span> {</span>
-<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>  results <span class="ot">&lt;-</span> <span class="dv">1</span><span class="sc">:</span><span class="fu">max</span>(configs<span class="sc">$</span>config_num) <span class="sc">|&gt;</span> </span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>results <span class="ot">&lt;-</span> <span class="dv">1</span><span class="sc">:</span><span class="fu">max</span>(configs<span class="sc">$</span>config_num) <span class="sc">|&gt;</span> </span>
 <span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">map</span>(\(config_current) <span class="fu">fit_eval</span>(config_current, configs, </span>
 <span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>                                 d, splits)) <span class="sc">|&gt;</span> </span>
 <span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">list_rbind</span>() <span class="sc">%&gt;%</span> </span>
@@ -366,27 +348,316 @@ $ hp2             &lt;int&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA
 <div class="cell">
 <div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">glimpse</span>(results)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>Rows: 990,000
-Columns: 13
-$ config_num      &lt;dbl&gt; 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, …
-$ outer_split_num &lt;dbl&gt; 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, …
-$ inner_split_num &lt;dbl&gt; 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, …
-$ feature_set     &lt;chr&gt; "thru_wk2", "thru_wk2", "thru_wk2", "thru_wk2", "thru_…
-$ hp1             &lt;dbl&gt; 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, …
-$ hp2             &lt;dbl&gt; 0.0003354626, 0.0003711182, 0.0004105636, 0.0004542015…
-$ accuracy        &lt;dbl&gt; 0.516129, 0.516129, 0.516129, 0.516129, 0.516129, 0.51…
-$ sens            &lt;dbl&gt; 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4,…
-$ spec            &lt;dbl&gt; 0.625, 0.625, 0.625, 0.625, 0.625, 0.625, 0.625, 0.625…
-$ ppv             &lt;dbl&gt; 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5,…
-$ npv             &lt;dbl&gt; 0.5263158, 0.5263158, 0.5263158, 0.5263158, 0.5263158,…
-$ roc_auc         &lt;dbl&gt; 0.4208333, 0.4208333, 0.4208333, 0.4208333, 0.4208333,…
-$ new_config_num  &lt;dbl&gt; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,…</code></pre>
+<pre><code>Rows: 33,000
+Columns: 12
+$ config_num     &lt;dbl&gt; 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1…
+$ split_num      &lt;dbl&gt; 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1…
+$ feature_set    &lt;chr&gt; "thru_wk2", "thru_wk2", "thru_wk2", "thru_wk2", "thru_w…
+$ hp1            &lt;dbl&gt; 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0…
+$ hp2            &lt;dbl&gt; 0.0003354626, 0.0003711182, 0.0004105636, 0.0004542015,…
+$ accuracy       &lt;dbl&gt; 0.6571429, 0.6571429, 0.6571429, 0.6571429, 0.6571429, …
+$ sens           &lt;dbl&gt; 0.6470588, 0.6470588, 0.6470588, 0.6470588, 0.6470588, …
+$ spec           &lt;dbl&gt; 0.6666667, 0.6666667, 0.6666667, 0.6666667, 0.6666667, …
+$ ppv            &lt;dbl&gt; 0.6470588, 0.6470588, 0.6470588, 0.6470588, 0.6470588, …
+$ npv            &lt;dbl&gt; 0.6666667, 0.6666667, 0.6666667, 0.6666667, 0.6666667, …
+$ roc_auc        &lt;dbl&gt; 0.6732026, 0.6732026, 0.6732026, 0.6732026, 0.6732026, …
+$ new_config_num &lt;dbl&gt; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, …</code></pre>
 </div>
 </div>
 <p>Save results</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>results <span class="sc">|&gt;</span> </span>
-<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">write_csv</span>(<span class="fu">str_c</span>(<span class="st">"~/Desktop/internship/moodivate/results_"</span>, cv_resample_type, <span class="st">".csv"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">write_csv</span>(<span class="fu">str_c</span>(<span class="st">"~/Desktop/internship/moodivate/results_"</span>,</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>                  cv_resample_type, <span class="st">".csv"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</section>
+</section>
+<section id="select-final-model-configurations" class="level2">
+<h2 class="anchored" data-anchor-id="select-final-model-configurations">Select final model configurations</h2>
+<p>We now use average performance across the 10 held-out folds to select the best model configuration. As a reminder, performance metrics are being used <em>only</em> for selection and <em>not</em> for model evaluation. Evaluation was completed in the outer loop of nested cross-validation.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>metrics_avg <span class="ot">&lt;-</span> results <span class="sc">|&gt;</span> </span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(feature_set, hp1, hp2) <span class="sc">|&gt;</span> </span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">summarize</span>(<span class="fu">across</span>(<span class="fu">c</span>(accuracy, roc_auc,</span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>                     sens, spec, ppv, npv),</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>                   median),</span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>            <span class="at">n_jobs =</span> <span class="fu">n</span>(), <span class="at">.groups =</span> <span class="st">"drop"</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">relocate</span>(n_jobs) <span class="sc">|&gt;</span> </span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="fu">desc</span>(roc_auc)) <span class="sc">|&gt;</span> </span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ungroup</span>()</span>
+<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a><span class="fu">glimpse</span>(metrics_avg)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Rows: 3,300
+Columns: 10
+$ n_jobs      &lt;int&gt; 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10…
+$ feature_set &lt;chr&gt; "thru_wk4", "thru_wk4", "thru_wk4", "thru_wk4", "thru_wk4"…
+$ hp1         &lt;dbl&gt; 0.8, 0.0, 1.0, 0.0, 0.9, 1.0, 0.8, 0.0, 1.0, 0.0, 0.0, 0.0…
+$ hp2         &lt;dbl&gt; 0.007683448, 0.086774329, 0.005674816, 0.070901432, 0.0069…
+$ accuracy    &lt;dbl&gt; 0.4924242, 0.4777184, 0.4924242, 0.4777184, 0.4924242, 0.5…
+$ roc_auc     &lt;dbl&gt; 0.5519031, 0.5501730, 0.5485510, 0.5484429, 0.5484429, 0.5…
+$ sens        &lt;dbl&gt; 0.5312500, 0.5147059, 0.5147059, 0.4852941, 0.5312500, 0.5…
+$ spec        &lt;dbl&gt; 0.5718954, 0.5294118, 0.5718954, 0.5424837, 0.5718954, 0.5…
+$ ppv         &lt;dbl&gt; 0.4852941, 0.4686275, 0.4852941, 0.4686275, 0.4852941, 0.5…
+$ npv         &lt;dbl&gt; 0.5000000, 0.4868421, 0.5000000, 0.4868421, 0.5000000, 0.5…</code></pre>
+</div>
+</div>
+<p>Select best model configuration for each feature set (through week 2 / through week 3 / through week 4).</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>best_config_thru_wk2 <span class="ot">&lt;-</span> metrics_avg <span class="sc">|&gt;</span> </span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(feature_set <span class="sc">==</span> <span class="st">"thru_wk2"</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">slice</span>(<span class="dv">1</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">print</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 1 × 10
+  n_jobs feature_set   hp1    hp2 accuracy roc_auc  sens  spec   ppv   npv
+   &lt;int&gt; &lt;chr&gt;       &lt;dbl&gt;  &lt;dbl&gt;    &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+1     10 thru_wk2        1 0.0524    0.507   0.531 0.324 0.618   0.5 0.511</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a>best_config_thru_wk3 <span class="ot">&lt;-</span> metrics_avg <span class="sc">|&gt;</span> </span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(feature_set <span class="sc">==</span> <span class="st">"thru_wk3"</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">slice</span>(<span class="dv">1</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">print</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 1 × 10
+  n_jobs feature_set   hp1    hp2 accuracy roc_auc  sens  spec   ppv   npv
+   &lt;int&gt; &lt;chr&gt;       &lt;dbl&gt;  &lt;dbl&gt;    &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+1     10 thru_wk3      0.9 0.0115    0.485   0.537 0.471 0.559 0.471   0.5</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb24"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a>best_config_thru_wk4 <span class="ot">&lt;-</span> metrics_avg <span class="sc">|&gt;</span> </span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(feature_set <span class="sc">==</span> <span class="st">"thru_wk4"</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">slice</span>(<span class="dv">1</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">print</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 1 × 10
+  n_jobs feature_set   hp1     hp2 accuracy roc_auc  sens  spec   ppv   npv
+   &lt;int&gt; &lt;chr&gt;       &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+1     10 thru_wk4      0.8 0.00768    0.492   0.552 0.531 0.572 0.485   0.5</code></pre>
+</div>
+</div>
+<p>Save out best configurations for each feature set</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a>best_config_thru_wk2 <span class="sc">|&gt;</span> </span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">write_csv</span>(<span class="fu">str_c</span>(<span class="st">"~/Desktop/internship/moodivate/best_config_thru_wk2.csv"</span>))</span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a>best_config_thru_wk3 <span class="sc">|&gt;</span> </span>
+<span id="cb26-5"><a href="#cb26-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">write_csv</span>(<span class="fu">str_c</span>(<span class="st">"~/Desktop/internship/moodivate/best_config_thru_wk3.csv"</span>))</span>
+<span id="cb26-6"><a href="#cb26-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb26-7"><a href="#cb26-7" aria-hidden="true" tabindex="-1"></a>best_config_thru_wk4 <span class="sc">|&gt;</span> </span>
+<span id="cb26-8"><a href="#cb26-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">write_csv</span>(<span class="fu">str_c</span>(<span class="st">"~/Desktop/internship/moodivate/best_config_thru_wk4.csv"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</section>
+<section id="fit-final-model" class="level2">
+<h2 class="anchored" data-anchor-id="fit-final-model">Fit final model</h2>
+<p>Ultimately, we will fit only one final model after having decided which feature set to favor (based on a performance vs.&nbsp;time-to-collect-data trade-off). This will be decided based on performance in the outer loop of nested cross-validation, <em>not</em> based on performance here in the final fitting stages.</p>
+<p>Set best model configuration (selected feature set)</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>best_config <span class="ot">&lt;-</span> best_config_thru_wk4</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Fit final model</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>rec <span class="ot">&lt;-</span> <span class="fu">build_recipe</span>(<span class="at">d =</span> d, <span class="at">config =</span> best_config)</span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a>rec_prepped_full <span class="ot">&lt;-</span> rec <span class="sc">|&gt;</span> </span>
+<span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">prep</span>(<span class="at">training =</span> d, <span class="at">strings_as_factors =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb28-5"><a href="#cb28-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb28-6"><a href="#cb28-6" aria-hidden="true" tabindex="-1"></a>feat_all <span class="ot">&lt;-</span> rec_prepped_full <span class="sc">|&gt;</span> </span>
+<span id="cb28-7"><a href="#cb28-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">bake</span>(<span class="at">new_data =</span> <span class="cn">NULL</span>)</span>
+<span id="cb28-8"><a href="#cb28-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb28-9"><a href="#cb28-9" aria-hidden="true" tabindex="-1"></a>penalty_weights <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="fu">rep</span>(<span class="dv">1</span>, <span class="fu">ncol</span>(feat_all) <span class="sc">-</span> <span class="dv">2</span>))</span>
+<span id="cb28-10"><a href="#cb28-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb28-11"><a href="#cb28-11" aria-hidden="true" tabindex="-1"></a>model_best_full <span class="ot">&lt;-</span> <span class="fu">fit_best_model</span>(<span class="at">best_model =</span> best_config, </span>
+<span id="cb28-12"><a href="#cb28-12" aria-hidden="true" tabindex="-1"></a>                                  <span class="at">feat =</span> feat_all, </span>
+<span id="cb28-13"><a href="#cb28-13" aria-hidden="true" tabindex="-1"></a>                                  <span class="at">ml_mode =</span> ml_mode,</span>
+<span id="cb28-14"><a href="#cb28-14" aria-hidden="true" tabindex="-1"></a>                                  <span class="at">algorithm =</span> algorithm,</span>
+<span id="cb28-15"><a href="#cb28-15" aria-hidden="true" tabindex="-1"></a>                                  <span class="at">penalty_weights =</span> penalty_weights)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<section id="model-coefficients" class="level3">
+<h3 class="anchored" data-anchor-id="model-coefficients">Model coefficients</h3>
+<p><strong>NOTE</strong>: Coefficients are naturally inverted (i.e., positive class [“non-responder”] treated as first [vs.&nbsp;second] class). Here, we multiply coefficients by -1 to align the direction of coefficients with the rest of our analyses. Once flipped (i.e., as they appear below)…</p>
+<p>A <em>positive coefficient</em> indicates that increases in the feature <em>increase</em> the likelihood of being a non-responder.</p>
+<p>A <em>negative coefficient</em> indicates that increases in the feature <em>decrease</em> the likelihood of being a non-responder (i.e., increase the likelihood of responding).</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a>model_tidy <span class="ot">&lt;-</span> <span class="fu">tidy</span>(model_best_full)</span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a>model_tidy <span class="sc">|&gt;</span> </span>
+<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">write_csv</span>(<span class="st">"~/Desktop/internship/moodivate/model_best_tidy.csv"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Table of all “retained” features (i.e., features whose parameter estimates were non-zero; parameter estimates of 0 indicate removal from the model via LASSO selection).</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb30"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a>retained_vars <span class="ot">&lt;-</span> model_tidy <span class="sc">|&gt;</span> </span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">estimate =</span> estimate <span class="sc">*</span> <span class="sc">-</span><span class="dv">1</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(<span class="fu">abs</span>(estimate) <span class="sc">&gt;</span> <span class="dv">0</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="sc">-</span>penalty) <span class="sc">|&gt;</span> </span>
+<span id="cb30-5"><a href="#cb30-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="fu">desc</span>(<span class="fu">abs</span>(estimate)))</span>
+<span id="cb30-6"><a href="#cb30-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb30-7"><a href="#cb30-7" aria-hidden="true" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(retained_vars, <span class="at">digits =</span> <span class="dv">4</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<table class="table table-sm table-striped small">
+<thead>
+<tr class="header">
+<th style="text-align: left;">term</th>
+<th style="text-align: right;">estimate</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">badges_earned_wk3</td>
+<td style="text-align: right;">0.3488</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">add_activity_wk3</td>
+<td style="text-align: right;">0.2509</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">badges_earned_wk4</td>
+<td style="text-align: right;">-0.2277</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">phq8_comp_wk4</td>
+<td style="text-align: right;">0.1808</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">phq8_comp_wk3</td>
+<td style="text-align: right;">-0.1702</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">average_session_time_wk2</td>
+<td style="text-align: right;">0.1698</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">session_count_wk3</td>
+<td style="text-align: right;">-0.1578</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">total_time_wk1</td>
+<td style="text-align: right;">-0.1504</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">total_time_wk2</td>
+<td style="text-align: right;">0.1453</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">bdi_baseline</td>
+<td style="text-align: right;">-0.1446</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">badges_earned_wk1</td>
+<td style="text-align: right;">-0.1440</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">completed_activities_wk2</td>
+<td style="text-align: right;">-0.1421</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">add_goal_wk1</td>
+<td style="text-align: right;">0.1339</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">completed_activities_wk4</td>
+<td style="text-align: right;">-0.1086</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">scheduled_activities_wk3</td>
+<td style="text-align: right;">0.0922</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">add_goal_wk4</td>
+<td style="text-align: right;">-0.0898</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">session_count_wk4</td>
+<td style="text-align: right;">-0.0585</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">(Intercept)</td>
+<td style="text-align: right;">-0.0498</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">completed_activities_wk1</td>
+<td style="text-align: right;">-0.0483</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">add_goal_wk2</td>
+<td style="text-align: right;">0.0339</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">add_activity_wk2</td>
+<td style="text-align: right;">-0.0265</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">average_session_time_wk1</td>
+<td style="text-align: right;">-0.0226</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">mood_days_wk3</td>
+<td style="text-align: right;">0.0206</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">average_session_time_wk3</td>
+<td style="text-align: right;">0.0202</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">badges_earned_wk2</td>
+<td style="text-align: right;">-0.0171</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">phq8_comp_wk2</td>
+<td style="text-align: right;">-0.0089</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">average_session_time_wk4</td>
+<td style="text-align: right;">-0.0034</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<p>We can also look at groupings of retained features by…</p>
+<p><strong>Feature type</strong></p>
+<p>Of note, <code>bdi_baseline</code> and <code>(Intercept)</code> can only have one feature as they do not repeat across weeks.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a>ret_vars_group <span class="ot">&lt;-</span> retained_vars <span class="sc">|&gt;</span> </span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">separate</span>(term, <span class="at">into =</span> <span class="fu">c</span>(<span class="st">"feature_type"</span>, <span class="st">"feature_week"</span>), </span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a>           <span class="at">sep =</span> <span class="st">"_(?=wk</span><span class="sc">\\</span><span class="st">d+)"</span>, <span class="at">remove =</span> <span class="cn">FALSE</span>,</span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a>           <span class="at">fill =</span> <span class="st">"right"</span>)</span>
+<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb31-6"><a href="#cb31-6" aria-hidden="true" tabindex="-1"></a>ret_vars_group <span class="sc">|&gt;</span> </span>
+<span id="cb31-7"><a href="#cb31-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(feature_type, estimate) <span class="sc">|&gt;</span> </span>
+<span id="cb31-8"><a href="#cb31-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">feature_type =</span> <span class="fu">factor</span>(feature_type)) <span class="sc">|&gt;</span> </span>
+<span id="cb31-9"><a href="#cb31-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">feature_type =</span> <span class="fu">fct_infreq</span>(feature_type)) <span class="sc">|&gt;</span> </span>
+<span id="cb31-10"><a href="#cb31-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> feature_type, <span class="at">fill =</span> feature_type)) <span class="sc">+</span></span>
+<span id="cb31-11"><a href="#cb31-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_bar</span>() <span class="sc">+</span></span>
+<span id="cb31-12"><a href="#cb31-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_flip</span>() <span class="sc">+</span></span>
+<span id="cb31-13"><a href="#cb31-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"none"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="04_fit_select_final_model_files/figure-html/unnamed-chunk-22-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
+</div>
+<p><strong>Feature week</strong></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb32"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a>ret_vars_group <span class="sc">|&gt;</span> </span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(feature_week, estimate) <span class="sc">|&gt;</span> </span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(<span class="sc">!</span><span class="fu">is.na</span>(feature_week)) <span class="sc">|&gt;</span> </span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">feature_week =</span> <span class="fu">factor</span>(feature_week,</span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a>                               <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">"wk1"</span>, <span class="st">"wk2"</span>, <span class="st">"wk3"</span>, <span class="st">"wk4"</span>),</span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a>                               <span class="at">labels =</span> <span class="fu">c</span>(<span class="st">"Week 1"</span>, <span class="st">"Week 2"</span>,</span>
+<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a>                                          <span class="st">"Week 3"</span>, <span class="st">"Week 4"</span>))) <span class="sc">|&gt;</span> </span>
+<span id="cb32-8"><a href="#cb32-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> feature_week, <span class="at">fill =</span> feature_week)) <span class="sc">+</span></span>
+<span id="cb32-9"><a href="#cb32-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_bar</span>() <span class="sc">+</span></span>
+<span id="cb32-10"><a href="#cb32-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_flip</span>() <span class="sc">+</span></span>
+<span id="cb32-11"><a href="#cb32-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">"none"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="04_fit_select_final_model_files/figure-html/unnamed-chunk-23-1.png" class="img-fluid figure-img" width="672"></p>
+</figure>
+</div>
+</div>
 </div>
 </section>
 </section>
