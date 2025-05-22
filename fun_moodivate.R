@@ -146,6 +146,7 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type,
     # make rset for single held-in/held_out split
     # does not work for bootstrapping
     split <- make_rset(splits, cv_resample_type = cv_resample_type, 
+                       split_num = config$split_num, 
                        inner_split_num = config$inner_split_num, 
                        outer_split_num = config$outer_split_num)
     
