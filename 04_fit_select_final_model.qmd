@@ -1,0 +1,367 @@
+---
+title: "Analysis Workflow Step 4: Select & fit final model"
+author: "Gaylen Fronk"
+format: html
+---
+
+## Setup
+
+Load libraries
+```{r, message = FALSE}
+library(glmnet)
+library(tidyverse)
+library(tidymodels)
+```
+
+Source functions file
+```{r}
+source("fun_moodivate.R")
+```
+This functions file (fun_moodivate.R) contains many functions that are used throughout the Moodivate project analysis scripts. Functions split data, fit and evaluate models, and provide helper functionality for the modeling process. See all code building functions within fun_moodivate.R. 
+
+## Read in data
+
+To ensure all proposed analyses are feasible and to specify analysis steps as precisely as possible, **we continue to conduct our proposed analyses using a shuffled (i.e., randomized) version of our dataset**. Following testing, our analyses will follow these scripts exactly using our real data.
+
+```{r}
+d <- read_csv("~/Desktop/internship/moodivate/toy_data.csv", 
+              show_col_types = FALSE) |> 
+  glimpse()
+```
+
+## Prepare data
+
+We prepare our data in the same way as all previous scripts.
+
+### Set up outcome variable levels
+
+```{r}
+y_col_name <- "bdi_outcome"
+y_level_pos <- "non_responder"
+y_level_neg <- "responder"
+```
+
+### Class variables & set factor levels
+
+```{r}
+d <- d |> 
+  # rename outcome to y
+  rename(y = !!y_col_name) |> 
+  mutate(y = case_when(
+    y == 0 ~ "non_responder",
+    y == 1 ~ "responder",
+    TRUE ~ NA_character_)) %>% 
+  # y as a factor with two levels, positive level first
+  mutate(y = factor(y, levels = c(!!y_level_pos,
+                                  !!y_level_neg))) |> 
+  # standardize naming
+  rename_with(~ str_replace(.x, "_w1", "_wk1")) |> 
+  rename_with(~ str_replace(.x, "_w2", "_wk2")) |> 
+  rename_with(~ str_replace(.x, "_w3", "_wk3")) |> 
+  rename_with(~ str_replace(.x, "_w4", "_wk4")) |> 
+  # move bdi_baseline to be first variable in dataset for penalty.factor
+  relocate(bdi_baseline) 
+
+
+```
+
+## Divide data
+
+### Set cross-validation parameters
+
+Following nested cross-validation conducted in scripts 01-03, the final step is to fit and select models using the *inner loop CV* but in our *entire dataset*. Consequently, we use one repeat of 10-fold CV. Performance metrics from this round of CV will **not** be used for model evaluation; they will only be used for selecting a final model configuration. 
+
+```{r}
+cv_resample_type <- "kfold"
+cv_resample <- "1_x_10"
+seed_splits <- 111594
+```
+
+### Make splits 
+
+Divide data using `make_splits()` function (from fun_moodivate.R). We are stratifying by the outcome variable `y` to ensure equal distribution of outcome classes across all inner and outer folds. 
+```{r}
+splits <- d |> 
+  make_splits(cv_resample_type, cv_resample, cv_outer_resample,
+              cv_inner_resample, the_seed = seed_splits,
+              strata = "y")
+```
+
+## Set up model configurations
+
+Possible model configurations are defined identically to previous scripts 01-03.
+
+```{r}
+algorithm <- "glmnet"
+ml_mode <- "classification"
+
+# alpha (mixture)
+hp1_glmnet <- c(0, seq(.1, 1, length.out = 10)) 
+
+# lambda (penalty)
+hp2_glmnet_min <- -8 # min for penalty grid - will be passed into exp(seq(min, max, length.out = out))
+hp2_glmnet_max <- 2 # max for penalty grid
+hp2_glmnet_out <- 100 # length of penalty grid
+```
+
+## Make configurations tibble
+
+This is a grid expansion of the splits, hyperparameters, and feature sets. Each row in the tibble will serve as a model configuration that can then be fit below. This tibble will also be used to connect results to model configurations.
+
+### Extract CV parameters from strings
+
+```{r}
+n_repeats <- as.numeric(str_remove(cv_resample,
+                                   "_x_\\d{1,2}"))
+n_folds <- as.numeric(str_remove(cv_resample,
+                                 "\\d{1,3}_x_"))
+split_num <- 1:(n_repeats * n_folds)
+
+```
+
+### Make configurations grid
+
+```{r}
+configs <- expand_grid(split_num = split_num,
+                       feature_set = c("thru_wk2", "thru_wk3", "thru_wk4"),
+                       hp1 = hp1_glmnet,
+                       hp2 = NA_integer_) |> 
+  tibble::rownames_to_column("config_num") |> 
+  mutate(config_num = as.numeric(config_num))
+
+glimpse(configs)
+```
+
+Feature sets are specific combinations of features. Here, we are fitting models separately that use data from weeks 1 & 2, weeks 1 through 3, and weeks 1 through 4 so that we can examine the trade-off between model performance and duration of data collection required before making a decision. 
+
+Note that hp2 (lambda/penalty) is listed as NA because each configuration will `tune()` across the 100 values set using `hp2_glmnet_min`, `hp2_glmnet_max`, and `hp2_glmnet_out` (length). 
+
+## Fit models
+
+As in previous scripts, we set up a wrapper function to `map()` over every model configuration (i.e., every row in the configs tibble). For each model configuration, we:
+
+1. Filter down to only that configuration's row in the model configurations tibble.
+
+2. Build a recipe using the custom `build_recipe()` function (in fun_moodivate.R). 
+
+3. Define a vector of penalty weights, which will apply equal penalty weighting to all variables except `bdi_baseline`, which will have a penalty weight of 0 and consequently will be included in all models. 
+
+4. Fit model, and get model performance metrics using our custom `tune_model()` from the fun_moodivate.R script. This function performs model tuning for the model configuration (defined by `feature_set`, `hp1`, and combination of inner and outer folds) across our range of values of `hp2`. 
+
+5. Append model performance metrics to the configs tibble in a new `results` tibble.
+
+```{r}
+fit_eval <- function(config_current, configs, d, splits) {
+  
+  # filter single config row from configs
+  config <- configs |> 
+    filter(config_num == config_current)
+  
+  # build recipe
+  rec <- build_recipe(d = d, config = config)
+  
+  # create penalty_weights vector using feature set dimensions
+  feat <- rec |> 
+    prep(training = d, strings_as_factors = FALSE) |> 
+    bake(new_data = NULL) 
+  penalty_weights <- c(0, rep(1, ncol(feat) - 2))
+  rm(feat) 
+  
+  # fit model & get predictions and model metrics
+  results <- tune_model(config = config,
+                        rec = rec, 
+                        splits = splits, 
+                        ml_mode = ml_mode, 
+                        cv_resample_type = cv_resample_type,
+                        hp2_glmnet_min = hp2_glmnet_min, 
+                        hp2_glmnet_max = hp2_glmnet_max, 
+                        hp2_glmnet_out = hp2_glmnet_out,
+                        y_level_pos = y_level_pos,
+                        penalty_weights = penalty_weights)
+  
+  return(results)
+}
+
+```
+
+### Fit models across all configurations
+
+```{r}
+if (file.exists(str_c("~/Desktop/internship/moodivate/results_",
+                      cv_resample_type, ".csv"))) {
+  results <- read_csv(str_c("~/Desktop/internship/moodivate/results_",
+                      cv_resample_type, ".csv"),
+                      show_col_types = F)
+} else {
+results <- 1:max(configs$config_num) |> 
+  map(\(config_current) fit_eval(config_current, configs, 
+                                 d, splits)) |> 
+  list_rbind() %>% 
+  mutate(new_config_num = 1:nrow(.))
+}
+
+```
+
+### Glimpse results
+
+This results file contains the information from the configuration grid, with model performance metrics appended to each row (i.e., model configuration). The grid has now been expanded to include each individual value for `hp2` (lambda/penalty) that was considered within `tune_models()`. 
+
+```{r}
+glimpse(results)
+```
+
+Save results
+```{r}
+results |> 
+  write_csv(str_c("~/Desktop/internship/moodivate/results_",
+                  cv_resample_type, ".csv"))
+```
+
+## Select final model configurations
+
+We now use average performance across the 10 held-out folds to select the best model configuration. As a reminder, performance metrics are being used *only* for selection and *not* for model evaluation. Evaluation was completed in the outer loop of nested cross-validation.
+
+```{r}
+metrics_avg <- results |> 
+  group_by(feature_set, hp1, hp2) |> 
+  summarize(across(c(accuracy, roc_auc,
+                     sens, spec, ppv, npv),
+                   median),
+            n_jobs = n(), .groups = "drop") |> 
+  relocate(n_jobs) |> 
+  arrange(desc(roc_auc)) |> 
+  ungroup()
+
+glimpse(metrics_avg)
+```
+
+Select best model configuration for each feature set (through week 2 / through week 3 / through week 4).
+
+```{r}
+best_config_thru_wk2 <- metrics_avg |> 
+  filter(feature_set == "thru_wk2") |> 
+  slice(1) |> 
+  print()
+
+best_config_thru_wk3 <- metrics_avg |> 
+  filter(feature_set == "thru_wk3") |> 
+  slice(1) |> 
+  print()
+
+best_config_thru_wk4 <- metrics_avg |> 
+  filter(feature_set == "thru_wk4") |> 
+  slice(1) |> 
+  print()
+```
+
+Save out best configurations for each feature set
+
+```{r}
+best_config_thru_wk2 |> 
+  write_csv(str_c("~/Desktop/internship/moodivate/best_config_thru_wk2.csv"))
+
+best_config_thru_wk3 |> 
+  write_csv(str_c("~/Desktop/internship/moodivate/best_config_thru_wk3.csv"))
+
+best_config_thru_wk4 |> 
+  write_csv(str_c("~/Desktop/internship/moodivate/best_config_thru_wk4.csv"))
+```
+
+## Fit final model
+
+Ultimately, we will fit only one final model after having decided which feature set to favor (based on a performance vs. time-to-collect-data trade-off). This will be decided based on performance in the outer loop of nested cross-validation, *not* based on performance here in the final fitting stages.
+
+Set best model configuration (selected feature set)
+
+```{r}
+best_config <- best_config_thru_wk4
+```
+
+Fit final model
+
+```{r}
+rec <- build_recipe(d = d, config = best_config)
+
+rec_prepped_full <- rec |> 
+  prep(training = d, strings_as_factors = FALSE)
+
+feat_all <- rec_prepped_full |> 
+  bake(new_data = NULL)
+
+penalty_weights <- c(0, rep(1, ncol(feat_all) - 2))
+
+model_best_full <- fit_best_model(best_model = best_config, 
+                                  feat = feat_all, 
+                                  ml_mode = ml_mode,
+                                  algorithm = algorithm,
+                                  penalty_weights = penalty_weights)
+```
+
+### Model coefficients
+
+**NOTE**: Coefficients are naturally inverted (i.e., positive class ["non-responder"] treated as first [vs. second] class). Here, we multiply coefficients by -1 to align the direction of coefficients with the rest of our analyses. Once flipped (i.e., as they appear below)...
+
+A *positive coefficient* indicates that increases in the feature *increase* the likelihood of being a non-responder. 
+
+A *negative coefficient* indicates that increases in the feature *decrease* the likelihood of being a non-responder (i.e., increase the likelihood of responding).
+
+```{r}
+model_tidy <- tidy(model_best_full)
+
+model_tidy |> 
+  write_csv("~/Desktop/internship/moodivate/model_best_tidy.csv")
+  
+```
+
+Table of all "retained" features (i.e., features whose parameter estimates were non-zero; parameter estimates of 0 indicate removal from the model via LASSO selection). 
+
+```{r}
+retained_vars <- model_tidy |> 
+  mutate(estimate = estimate * -1) |> 
+  filter(abs(estimate) > 0) |> 
+  select(-penalty) |> 
+  arrange(desc(abs(estimate)))
+
+knitr::kable(retained_vars, digits = 4)
+```
+
+We can also look at groupings of retained features by...
+
+**Feature type**
+
+Of note, `bdi_baseline` and `(Intercept)` can only have one feature as they do not repeat across weeks.
+
+```{r}
+ret_vars_group <- retained_vars |> 
+  separate(term, into = c("feature_type", "feature_week"), 
+           sep = "_(?=wk\\d+)", remove = FALSE,
+           fill = "right")
+
+ret_vars_group |> 
+  select(feature_type, estimate) |> 
+  mutate(feature_type = factor(feature_type)) |> 
+  mutate(feature_type = fct_infreq(feature_type)) |> 
+  ggplot(aes(x = feature_type, fill = feature_type)) +
+  geom_bar() +
+  coord_flip() +
+  theme(legend.position = "none")
+
+```
+
+**Feature week**
+
+```{r}
+ret_vars_group |> 
+  select(feature_week, estimate) |> 
+  filter(!is.na(feature_week)) |> 
+  mutate(feature_week = factor(feature_week,
+                               levels = c("wk1", "wk2", "wk3", "wk4"),
+                               labels = c("Week 1", "Week 2",
+                                          "Week 3", "Week 4"))) |> 
+  ggplot(aes(x = feature_week, fill = feature_week)) +
+  geom_bar() +
+  coord_flip() +
+  theme(legend.position = "none")
+  
+```
+
