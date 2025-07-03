@@ -118,8 +118,7 @@ build_recipe <- function(d, config) {
 
 tune_model <- function(config, rec, splits, ml_mode, cv_resample_type, 
                        hp2_glmnet_min = NULL, hp2_glmnet_max = NULL, 
-                       hp2_glmnet_out = NULL, y_level_pos = NULL,
-                       penalty_weights = NULL) {
+                       hp2_glmnet_out = NULL, y_level_pos = NULL) {
   # config: single-row config-specific tibble from jobs
   # splits: rset object that contains all resamples
   # rec: recipe (created manually or via build_recipe() function)
@@ -127,7 +126,6 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type,
   # cv_resample_type: nested, kfold, or boot
   # hp2_*: min, max, and length of vector for hp2 (lambda/penalty) tuning parameter
   # y_level_pos: positive (event) level for outcome variable y
-  # penalty_weights: (optional) vector of penalty weights if different weighting is desired across variables
   
   # set metrics for regression or classification
   if (ml_mode == "regression") {
@@ -149,6 +147,41 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type,
                        split_num = config$split_num, 
                        inner_split_num = config$inner_split_num, 
                        outer_split_num = config$outer_split_num)
+    
+    # make penalty_weights vector
+    # requires exact dimensions of split-specific feature set
+    d_in <- training(split$splits[[1]]) 
+    d_out <- testing(split$splits[[1]])
+    
+    rec_in <- recipe(y ~ ., data = d_in) |> 
+      step_rm(record_id) |>
+      # standardize features, required for glmnet for weighting
+      step_normalize(all_predictors()) |> 
+      # remove near-zero-variance features
+      step_nzv(all_predictors())
+    
+    if (config$feature_set == "thru_wk2") {
+      rec_in <- rec_in |> 
+        step_select(-ends_with("_wk3"), -ends_with("_wk4"))
+    }
+    
+    if (config$feature_set == "thru_wk3") {
+      rec_in <- rec_in |> 
+        step_select(-ends_with("_wk4"))
+    }
+    
+    rec_prepped_in <- rec_in |> 
+      prep(training = d_in, strings_as_factors = FALSE)
+    
+    feat_in <- rec_prepped_in |> 
+      bake(new_data = NULL)
+    
+    penalty_weights <- c(0, rep(1, ncol(feat_in) - 2))
+    # removing 2 columns - bdi_baseline (already captured with "0") and y
+    
+    rm(feat_in)
+    rm(rec_prepped_in)
+    rm(rec_in)
     
     # backward compatible for tune controls that didnt set family 
     if (!exists("glm_family")) glm_family <- if_else(ml_mode == "regression", "gaussian", "binomial")

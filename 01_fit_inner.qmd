@@ -32,7 +32,7 @@ To create our shuffled dataset, we randomly sample (without replacement) **EVAN:
 * Maintains the exact data structure (variable types, outcome variable distribution, predictor variable distributions)
 
 ```{r}
-d <- read_csv("~/Desktop/internship/moodivate/toy_data.csv", 
+d <- read_csv("~/Desktop/internship/moodivate/data_clean.csv", 
               show_col_types = FALSE) |> 
   glimpse()
 ```
@@ -178,13 +178,6 @@ fit_eval <- function(config_current, configs, d, splits) {
   # build recipe
   rec <- build_recipe(d = d, config = config)
   
-  # create penalty_weights vector using feature set dimensions
-  feat <- rec |> 
-    prep(training = d, strings_as_factors = FALSE) |> 
-    bake(new_data = NULL) 
-  penalty_weights <- c(0, rep(1, ncol(feat) - 2))
-  rm(feat) 
-  
   # fit model & get predictions and model metrics
   results <- tune_model(config = config,
                         rec = rec, 
@@ -194,8 +187,7 @@ fit_eval <- function(config_current, configs, d, splits) {
                         hp2_glmnet_min = hp2_glmnet_min, 
                         hp2_glmnet_max = hp2_glmnet_max, 
                         hp2_glmnet_out = hp2_glmnet_out,
-                        y_level_pos = y_level_pos,
-                        penalty_weights = penalty_weights)
+                        y_level_pos = y_level_pos)
   
   return(results)
 }
@@ -211,7 +203,7 @@ if (file.exists(str_c("~/Desktop/internship/moodivate/results_",
                       cv_resample_type, ".csv"),
                       show_col_types = F)
 } else {
-  results <- 1:max(configs$config_num) |> 
+  results <- min(configs$config_num):max(configs$config_num) |> 
   map(\(config_current) fit_eval(config_current, configs, 
                                  d, splits)) |> 
   list_rbind() %>% 
