@@ -1,0 +1,204 @@
+---
+title: "Fit Simpler Models (Inner)"
+author: "Gaylen Fronk"
+format: html
+---
+
+## Setup
+
+Load libraries
+```{r, message = FALSE}
+library(glmnet)
+library(tidyverse)
+library(tidymodels)
+```
+
+Source functions file
+```{r}
+source("fun_moodivate.R")
+```
+
+## Read in data
+
+```{r}
+d <- read_csv("~/Desktop/dahne_lab/moodivate/data_clean.csv", 
+              show_col_types = FALSE) |> 
+  glimpse()
+```
+
+## Prepare data
+
+### Set up outcome variable levels
+
+We define our outcome variable (y_col_name) as `bdi_outcome`, which will be renamed as `y` to facilitate using cross-study functions and code. The two levels of the outcome variable (non-responder and responder) are set to have non-responder as the positive (event) level, as our goal is to identify non-responders to the Moodivate DMHI who should be stepped up to a higher level of care.
+```{r}
+y_col_name <- "bdi_outcome"
+y_level_pos <- "non_responder"
+y_level_neg <- "responder"
+```
+
+### Class variables & set factor levels
+
+```{r}
+d <- d |> 
+  # rename outcome to y
+  rename(y = !!y_col_name) |> 
+  mutate(y = case_when(
+    y == 0 ~ "non_responder",
+    y == 1 ~ "responder",
+    TRUE ~ NA_character_)) %>% 
+  # y as a factor with two levels, positive level first
+  mutate(y = factor(y, levels = c(!!y_level_pos,
+                                  !!y_level_neg))) |> 
+  # standardize naming
+  rename_with(~ str_replace(.x, "_w1", "_wk1")) |> 
+  rename_with(~ str_replace(.x, "_w2", "_wk2")) |> 
+  rename_with(~ str_replace(.x, "_w3", "_wk3")) |> 
+  rename_with(~ str_replace(.x, "_w4", "_wk4")) |> 
+  # move bdi_baseline to be first variable in dataset for penalty.factor
+  relocate(bdi_baseline) 
+
+
+```
+
+## Divide data
+
+### Set cross-validation parameters
+
+```{r}
+cv_resample_type <- "nested"
+cv_outer_resample <- "3_x_10"
+cv_inner_resample <- "1_x_10"
+seed_splits <- 52592
+```
+
+### Make splits 
+
+Divide data using `make_splits()` function (from fun_moodivate.R). We are stratifying by the outcome variable `y` to ensure equal distribution of outcome classes across all inner and outer folds. 
+```{r}
+splits <- d |> 
+  make_splits(cv_resample_type, cv_resample, cv_outer_resample,
+              cv_inner_resample, the_seed = seed_splits,
+              strata = "y")
+```
+
+## Set up model configurations
+
+```{r}
+algorithm <- "glm"
+ml_mode <- "classification"
+
+# # alpha (mixture)
+# hp1_glmnet <- c(0, seq(.1, 1, length.out = 10)) 
+# 
+# # lambda (penalty)
+# hp2_glmnet_min <- 4.1 # min for penalty grid - will be passed into exp(seq(min, max, length.out = out))
+# hp2_glmnet_max <- 5.5 # max for penalty grid
+# hp2_glmnet_out <- 15 # length of penalty grid
+```
+
+## Make configurations tibble
+
+This is a grid expansion of the splits, hyperparameters, and feature sets. Each row in the tibble will serve as a model configuration that can then be fit below. This tibble will also be used to connect results to model configurations.
+
+### Extract CV parameters from strings
+
+```{r}
+# outer cv loop
+outer_n_repeats <- as.numeric(str_remove(cv_outer_resample,
+                                         "_x_\\d{1,2}"))
+outer_n_folds <- as.numeric(str_remove(cv_outer_resample,
+                                       "\\d{1,3}_x_"))
+outer_split_num <- 1:(outer_n_repeats * outer_n_folds)
+
+# inner cv loop
+inner_n_repeats <- as.numeric(str_remove(cv_inner_resample,
+                                         "_x_\\d{1,2}"))
+inner_n_folds <- as.numeric(str_remove(cv_inner_resample,
+                                       "\\d{1,3}_x_"))
+inner_split_num <- 1:(inner_n_repeats * inner_n_folds)
+
+```
+
+### Make configurations grid
+
+```{r}
+configs <- expand_grid(outer_split_num = outer_split_num,
+                       inner_split_num = inner_split_num,
+                       algorithm = algorithm,
+                       feature_set = c("thru_wk2", "thru_wk3", "thru_wk4",
+                                       "sess_count", "total_time",
+                                       "sess_time", "add_act",
+                                       "sched_act", "complete_act",
+                                       "add_goal", "badges", "mood_days",
+                                       "phq8"),
+                       hp1 = NA_integer_,
+                       hp2 = NA_integer_) |> 
+  tibble::rownames_to_column("config_num") |> 
+  mutate(config_num = as.numeric(config_num))
+
+glimpse(configs)
+```
+
+## Fit models
+
+Set up wrapper function to `map()` over every model configuration (i.e., every row in the configs tibble). 
+
+```{r}
+fit_eval <- function(config_current, configs, d, splits) {
+  
+  # filter single config row from configs
+  config <- configs |> 
+    filter(config_num == config_current)
+  
+  # build recipe
+  rec <- build_recipe(d = d, config = config)
+  
+  # fit model & get predictions and model metrics
+  results <- tune_model(config = config,
+                        rec = rec, 
+                        splits = splits, 
+                        ml_mode = ml_mode, 
+                        cv_resample_type = cv_resample_type,
+                        hp2_glmnet_min = NULL, 
+                        hp2_glmnet_max = NULL, 
+                        hp2_glmnet_out = NULL,
+                        y_level_pos = y_level_pos)
+  
+  return(results)
+}
+
+```
+
+### Fit models across all configurations
+
+```{r}
+if (file.exists(str_c("~/Desktop/dahne_lab/moodivate/results_",
+                      cv_resample_type, "_glm.csv"))) {
+  results <- read_csv(str_c("~/Desktop/dahne_lab/moodivate/results_",
+                            cv_resample_type, "_glm.csv"),
+                      show_col_types = F)
+} else {
+  results <- min(configs$config_num):max(configs$config_num) |> 
+    map(\(config_current) fit_eval(config_current, configs, 
+                                   d, splits)) |> 
+    list_rbind() %>% 
+    mutate(new_config_num = 1:nrow(.))
+}
+
+```
+
+### Glimpse results
+
+This results file contains the information from the configuration grid, with model performance metrics appended to each row (i.e., model configuration). The grid has now been expanded to include each individual value for `hp2` (lambda/penalty) that was considered within `tune_models()`. 
+
+```{r}
+glimpse(results)
+```
+
+Save results
+```{r}
+results |> 
+  write_csv(str_c("~/Desktop/dahne_lab/moodivate/results_", 
+                  cv_resample_type, "_glm.csv"))
+```
