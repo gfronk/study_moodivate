@@ -32,7 +32,7 @@ To create our shuffled dataset, we randomly sample (without replacement) **EVAN:
 * Maintains the exact data structure (variable types, outcome variable distribution, predictor variable distributions)
 
 ```{r}
-d <- read_csv("~/Desktop/internship/moodivate/data_clean.csv", 
+d <- read_csv("~/Desktop/dahne_lab/moodivate/data_clean.csv", 
               show_col_types = FALSE) |> 
   glimpse()
 ```
@@ -55,9 +55,9 @@ d <- d |>
   # rename outcome to y
   rename(y = !!y_col_name) |> 
   mutate(y = case_when(
-                       y == 0 ~ "non_responder",
-                       y == 1 ~ "responder",
-                       TRUE ~ NA_character_)) %>% 
+    y == 0 ~ "non_responder",
+    y == 1 ~ "responder",
+    TRUE ~ NA_character_)) %>% 
   # y as a factor with two levels, positive level first
   mutate(y = factor(y, levels = c(!!y_level_pos,
                                   !!y_level_neg))) |> 
@@ -108,9 +108,9 @@ ml_mode <- "classification"
 hp1_glmnet <- c(0, seq(.1, 1, length.out = 10)) 
 
 # lambda (penalty)
-hp2_glmnet_min <- -8 # min for penalty grid - will be passed into exp(seq(min, max, length.out = out))
-hp2_glmnet_max <- 2 # max for penalty grid
-hp2_glmnet_out <- 100 # length of penalty grid
+hp2_glmnet_min <- 4.1 # min for penalty grid - will be passed into exp(seq(min, max, length.out = out))
+hp2_glmnet_max <- 5.5 # max for penalty grid
+hp2_glmnet_out <- 15 # length of penalty grid
 ```
 
 ## Make configurations tibble
@@ -197,17 +197,17 @@ fit_eval <- function(config_current, configs, d, splits) {
 ### Fit models across all configurations
 
 ```{r}
-if (file.exists(str_c("~/Desktop/internship/moodivate/results_",
+if (file.exists(str_c("~/Desktop/dahne_lab/moodivate/results_",
                       cv_resample_type, ".csv"))) {
-  results <- read_csv(str_c("~/Desktop/internship/moodivate/results_",
-                      cv_resample_type, ".csv"),
+  results <- read_csv(str_c("~/Desktop/dahne_lab/moodivate/results_",
+                            cv_resample_type, ".csv"),
                       show_col_types = F)
 } else {
   results <- min(configs$config_num):max(configs$config_num) |> 
-  map(\(config_current) fit_eval(config_current, configs, 
-                                 d, splits)) |> 
-  list_rbind() %>% 
-  mutate(new_config_num = 1:nrow(.))
+    map(\(config_current) fit_eval(config_current, configs, 
+                                   d, splits)) |> 
+    list_rbind() %>% 
+    mutate(new_config_num = 1:nrow(.))
 }
 
 ```
@@ -223,7 +223,8 @@ glimpse(results)
 Save results
 ```{r}
 results |> 
-  write_csv(str_c("~/Desktop/internship/moodivate/results_", cv_resample_type, ".csv"))
+  write_csv(str_c("~/Desktop/dahne_lab/moodivate/results_", 
+                  cv_resample_type, "_c.csv"))
 ```
 
 

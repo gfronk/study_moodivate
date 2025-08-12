@@ -34,10 +34,25 @@ Read in results file ("results.csv") created in 01_fit_inner.qmd. This file cont
 ```{r}
 cv_resample_type <- "nested"
 
-results <- read_csv(str_c("~/Desktop/internship/moodivate/results_",
-                      cv_resample_type, ".csv"), 
+results_glmnet <- read_csv(str_c("~/Desktop/dahne_lab/moodivate/results_",
+                      cv_resample_type, "_glmnet.csv"), 
+                    show_col_types = FALSE) |> 
+  mutate(algorithm = "glmnet") |> 
+  relocate(algorithm, .before = feature_set) |> 
+  glimpse()
+
+results_glm <- read_csv(str_c("~/Desktop/dahne_lab/moodivate/results_",
+                      cv_resample_type, "_glm.csv"), 
                     show_col_types = FALSE) |> 
   glimpse()
+
+results <- bind_rows(results_glmnet, results_glm) |> 
+  arrange(outer_split_num, inner_split_num)
+glimpse(results)
+
+results |> 
+  write_csv(str_c("~/Desktop/dahne_lab/moodivate/results_",
+                      cv_resample_type, "_all.csv"))
 ```
 
 ## Process metrics
@@ -52,7 +67,7 @@ results <- results |>
 
 nrow(results)
 ```
-No duplicates
+Some duplicates got made when I added hp2 values for glmnet algorithms.
 
 Checks that breakdowns are as expected. Should be equal numbers of each value.
 ```{r}
@@ -61,7 +76,9 @@ results |> janitor::tabyl(inner_split_num)
 results |> janitor::tabyl(hp1) 
 results |> janitor::tabyl(hp2) 
 results |> janitor::tabyl(feature_set)
+results |> janitor::tabyl(algorithm)
 ```
+hp1 values are showing up a little weird here for some reason, but they aggregate together correctly.
 
 ## Median metrics across inner folds for model configurations
 
@@ -69,7 +86,7 @@ This process groups by `outer_split_number`, `feature_set`, `hp1`, and `hp2` suc
 
 ```{r}
 metrics_avg <- results |> 
-  group_by(outer_split_num, feature_set, hp1, hp2) |> 
+  group_by(outer_split_num, algorithm, feature_set, hp1, hp2) |> 
   summarize(across(c(accuracy, roc_auc,
                      sens, spec, ppv, npv),
                    median),
@@ -92,6 +109,7 @@ The `n_jobs` variable should always be 10 jobs (10 inner held-out folds per comb
 metrics_avg |> 
   filter(feature_set == "thru_wk2") |> 
   slice(1:50) |> 
+  select(feature_set, algorithm, hp1, hp2, roc_auc) |> 
   print()
 
 metrics_avg |> 
@@ -105,6 +123,7 @@ metrics_avg |>
 ```{r}
 metrics_avg |> 
   filter(feature_set == "thru_wk3") |> 
+  select(feature_set, algorithm, hp1, hp2, roc_auc) |> 
   slice(1:50) |> 
   print()
 
@@ -119,6 +138,7 @@ metrics_avg |>
 ```{r}
 metrics_avg |> 
   filter(feature_set == "thru_wk4") |> 
+  select(feature_set, algorithm, hp1, hp2, roc_auc) |> 
   slice(1:50) |> 
   print()
 
@@ -128,11 +148,71 @@ metrics_avg |>
   hist()
 ```
 
+**Performance: Single-Feature Group Models**
+```{r}
+metrics_avg |> 
+  filter(!str_detect(feature_set, "thru_")) |> 
+  select(feature_set, algorithm, roc_auc) |> 
+  slice(1:50) |> 
+  print()
+```
+
+**Performance: By Algorithm**
+```{r}
+metrics_avg |> 
+  group_by(algorithm) |> 
+  summarize(median_auc = median(roc_auc),
+            min_auc = min(roc_auc),
+            max_auc = max(roc_auc))
+```
+
+**Performance: Across Feature Sets**
+
+Median performance across ALL configurations
+```{r}
+
+
+metrics_avg |> 
+  summarize(median_auc = median(roc_auc),
+            min_auc = min(roc_auc),
+            max_auc = max(roc_auc))
+```
+
+Performance of best configurations
+```{r}
+set.seed(11397)
+configs_best <- metrics_avg |> 
+  # negate hp1 so that we can prefer the max (hp1 closest to 0)
+  mutate(inv_hp1 = hp1 * -1) |> 
+  group_by(outer_split_num) |> 
+  # select config w max roc_auc with lowest hp1 (highest inv_hp1)
+  # keep remaining ties (i.e., same roc_auc and same hp1)
+  slice_max(order_by = tibble(roc_auc, inv_hp1), with_ties = TRUE) |> 
+  ungroup() |> 
+  group_by(outer_split_num) |> 
+  # among remaining ties, randomly select single config 
+  slice_sample(n = 1) |> 
+  select(-inv_hp1) |> 
+  ungroup()
+
+configs_best |> 
+  select(outer_split_num, algorithm, feature_set, hp1, hp2, roc_auc) |> 
+  print(n = Inf)
+
+configs_best |> 
+  ggplot(aes(x = roc_auc)) +
+  geom_histogram() 
+
+configs_best |> 
+  pull(roc_auc) |> 
+  median()
+```
+
 Save average metrics file (all feature sets)
 ```{r}
 metrics_avg |> 
   arrange(outer_split_num, feature_set, hp1, hp2) |> 
-  readr::write_csv("~/Desktop/internship/moodivate/metrics_inner_avg.csv")
+  readr::write_csv("~/Desktop/dahne_lab/moodivate/metrics_inner_avg.csv")
 ```
 
 ## Plot tuning parameters
@@ -142,7 +222,17 @@ This plot shows performance as a function of alpha/mixture (`hp1`) and lambda/pe
 With real data, we will confirm that the plot captures a peak (i.e., local maximum) in performance (auROC) before continuing to outer loop model fitting and evaluation. If performance is increasing toward one end of the range for either tuning parameter, we will **NOT** yet proceed to fitting and evaluating models in the outer loop (in 03_fit_eval_outer.qmd). First, we will add model configurations that expand the range, run those additional configurations in the inner loop, and re-evaluate model performance as a function of tuning parameters. 
 
 ```{r}
-metrics_plot <- metrics_avg |> 
+metrics_plot <- results |> 
+  filter(algorithm == "glmnet") |> 
+  # don't group by outer_split_num, otherwise too many data points
+  group_by(feature_set, hp1, hp2) |> 
+  summarize(across(c(accuracy, roc_auc,
+                     sens, spec, ppv, npv),
+                   median),
+            n_jobs = n(), .groups = "drop") |> 
+  relocate(n_jobs) |> 
+  arrange(desc(roc_auc)) |> 
+  ungroup() |> 
   mutate(feature_set = case_when(
     feature_set == "thru_wk2" ~ "Weeks 1 & 2",
     feature_set == "thru_wk3" ~ "Weeks 1 - 3",
@@ -166,7 +256,8 @@ for (i in feature_sets) {
                          y = roc_auc, 
                          group = hp1, 
                          color = hp1)) +
-    geom_line() +
+    geom_point(size = 0.1) +
+    facet_wrap(vars(hp1)) +
     scale_color_discrete(name = "mixture (alpha)") +
     labs(title = plot_title, x = "penalty (lambda)", y = "auROC")
   
@@ -174,4 +265,78 @@ for (i in feature_sets) {
   
 }
 ```
+
+## Plot by feature set
+
+```{r}
+metrics_plot <- results |> 
+  # don't group by outer_split_num, otherwise too many data points
+  group_by(algorithm, feature_set, hp1, hp2) |> 
+  summarize(across(c(accuracy, roc_auc,
+                     sens, spec, ppv, npv),
+                   median),
+            n_jobs = n(), .groups = "drop") |> 
+  relocate(n_jobs) |> 
+  arrange(desc(roc_auc)) |> 
+  ungroup() 
+
+metrics_plot <- metrics_plot |> 
+  group_by(feature_set) |> 
+  summarize(med_roc = median(roc_auc)) |> 
+  ungroup()
+
+# larger feature sets
+metrics_plot |> 
+  ggplot(mapping = aes(x = feature_set,
+                       fill = feature_set,
+                       y = med_roc)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Performance by Feature Set",
+       x = "auROC")
+
+# simpler feature sets
+
+```
+
+
+```{r}
+configs_best |> 
+  pull(feature_set) |> 
+  janitor::tabyl()
+
+metrics_avg |> 
+  filter(feature_set == "total_time") |> 
+  pull(roc_auc) |> 
+  median()
+
+
+
+```
+
+stepwise regression starting total time, see what it wants to add?
+non-linear relationships - evan will evaluate linearity of relationships of each variable with outcome
+consider other algorithms? quadratic terms?
+
+decision: keep going! find a way to distinguish responders and non-responders!
+
+distribution of BDI outcome by BDI baseline
+
+should BDI baseline interact with other variables?
+
+univariate relationships - check for linearity
+correlation table among variables
+
+EDA STEPS
+1. overall / responders / non-responders "table" with rows for each variable plus is there a significant relationship
+-- group by feature type, separate out by week within each group
+-- descriptive stats in each of the columns (overall plus R/NR), plus column with appropriate stat test of difference across groups
+-- visually: plot each feature type over time then use loess. one panel overall, second panel colored/grouped by outcome
+
+2. density plots - one panel overall, second panel overlaid plots colored by response category. histograms or bar charts depending on how "discrete" the variable levels are. 4 X 2 where each row is a time point and each column is overall vs by outcome group
+
+3. linearity (EVAN) - smoothed scatterplots
+
+4. correlations among predictors
+
 

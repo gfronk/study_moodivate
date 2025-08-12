@@ -18,7 +18,7 @@ make_splits <- function(d, cv_resample_type,
   # the_seed: seed to ensure replication
   # cv_group: grouping variable if doing grouped cross-validation (optional)
   # strata: stratification variable (optional)
-
+  
   if(is.null(the_seed)) {
     error("make_splits() requires a seed")
   } else set.seed(the_seed)
@@ -35,8 +35,8 @@ make_splits <- function(d, cv_resample_type,
     n_repeats <- as.numeric(str_remove(cv_resample, "_x_\\d{1,2}"))
     n_folds <- as.numeric(str_remove(cv_resample, "\\d{1,3}_x_"))
     
-      splits <- d %>% 
-        vfold_cv(v = n_folds, repeats = n_repeats, strata = all_of(strata)) 
+    splits <- d %>% 
+      vfold_cv(v = n_folds, repeats = n_repeats, strata = all_of(strata)) 
   }
   
   
@@ -63,7 +63,7 @@ make_splits <- function(d, cv_resample_type,
                   inside = vfold_cv(v = inner_n_folds, repeats = inner_n_repeats,
                                     strata = all_of(strata)))
     }
-
+    
   }
   
   return(splits)
@@ -111,9 +111,102 @@ build_recipe <- function(d, config) {
       step_select(-ends_with("_wk4"))
   }
   
+  if (config$feature_set == "sess_count") {
+    rec <- rec |> 
+      step_select(bdi_baseline, starts_with("session_count"), y)
+  }
+  
+  if (config$feature_set == "total_time") {
+    rec <- rec |> 
+      step_select(bdi_baseline, starts_with("total_time"), y)
+  }
+  
+  if (config$feature_set == "sess_time") {
+    rec <- rec |> 
+      step_select(bdi_baseline, starts_with("average_session_time"), y)
+  }
+  
+  if (config$feature_set == "add_act") {
+    rec <- rec |> 
+      step_select(bdi_baseline, starts_with("add_activity"), y)
+  }
+  
+  if (config$feature_set == "sched_act") {
+    rec <- rec |> 
+      step_select(bdi_baseline, starts_with("scheduled_activities"), y)
+  }
+  
+  if (config$feature_set == "complete_act") {
+    rec <- rec |> 
+      step_select(bdi_baseline, starts_with("completed_activities"), y)
+  }
+  
+  if (config$feature_set == "add_goal") {
+    rec <- rec |> 
+      step_select(bdi_baseline, starts_with("add_goal"), y)
+  }
+  
+  if (config$feature_set == "badges") {
+    rec <- rec |> 
+      step_select(bdi_baseline, starts_with("badges_earned"), y)
+  }
+  
+  if (config$feature_set == "mood_days") {
+    rec <- rec |> 
+      step_select(bdi_baseline, starts_with("mood_days"), y)
+  }
+  
+  if (config$feature_set == "phq8") {
+    rec <- rec |> 
+      step_select(bdi_baseline, starts_with("phq8_comp"), y)
+  }
+  
   # no additional selection steps for feature set "thru_wk4" (all data used)
   
   return(rec)
+}
+
+get_metrics <- function(model, feat_out, ml_mode, y_level_pos = NULL) {
+  
+  # model: single model object 
+  # feat_out: feature matrix built from held-out data
+  # y_level_pos only needed for classification 
+  
+  if (ml_mode == "classification") {
+    preds <- predict(model, feat_out, type = "class")$.pred_class
+    
+    cm <- tibble(truth = feat_out$y,
+                 estimate = preds) %>% 
+      conf_mat(truth, estimate)
+    
+    model_metrics <- cm %>% 
+      summary(event_level = "first") %>%   # make sure this is true in recipe
+      select(metric = .metric,
+             estimate = .estimate) %>% 
+      filter(metric %in% c("sens", "spec", "ppv", "npv", "accuracy", "bal_accuracy")) %>% 
+      suppressWarnings() # warning not about metrics we are returning
+    
+    roc <- tibble(truth = feat_out$y,
+                  prob = predict(model, feat_out,
+                                 type = "prob")[[str_c(".pred_", y_level_pos)]]) %>% 
+      roc_auc(prob, truth = truth, event_level = "first") %>% 
+      select(metric = .metric, 
+             estimate = .estimate)
+    
+    model_metrics <- bind_rows(model_metrics, roc)
+  }
+  
+  if (ml_mode == "regression") {
+    
+    preds <- predict(model, feat_out)$.pred
+    mae_model <- mae_vec(truth = feat_out$y, estimate = preds)
+    rmse_model <- rmse_vec(truth = feat_out$y, estimate = preds)
+    rsq_model <- rsq_vec(truth = feat_out$y, estimate = preds)
+    
+    model_metrics <- tibble(mae = mae_model, rsq = rsq_model, rmse = rmse_model)
+  }
+  
+  return(model_metrics)
 }
 
 tune_model <- function(config, rec, splits, ml_mode, cv_resample_type, 
@@ -153,22 +246,7 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type,
     d_in <- training(split$splits[[1]]) 
     d_out <- testing(split$splits[[1]])
     
-    rec_in <- recipe(y ~ ., data = d_in) |> 
-      step_rm(record_id) |>
-      # standardize features, required for glmnet for weighting
-      step_normalize(all_predictors()) |> 
-      # remove near-zero-variance features
-      step_nzv(all_predictors())
-    
-    if (config$feature_set == "thru_wk2") {
-      rec_in <- rec_in |> 
-        step_select(-ends_with("_wk3"), -ends_with("_wk4"))
-    }
-    
-    if (config$feature_set == "thru_wk3") {
-      rec_in <- rec_in |> 
-        step_select(-ends_with("_wk4"))
-    }
+    rec_in <- build_recipe(d_in, config)
     
     rec_prepped_in <- rec_in |> 
       prep(training = d_in, strings_as_factors = FALSE)
@@ -235,6 +313,54 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type,
       relocate(hp2, .after = hp1) 
     
     return(results)
+  }
+  
+  if (config$algorithm == "glm") {
+    
+    # extract fold associated with this config - 1 held in and 1 held out set 
+    # and make 1 set of features for the held in and held out set 
+    split <- make_rset(splits, cv_resample_type = cv_resample_type, 
+                       split_num = config$split_num, 
+                       inner_split_num = config$inner_split_num, 
+                       outer_split_num = config$outer_split_num)
+    
+    # make penalty_weights vector
+    # requires exact dimensions of split-specific feature set
+    d_in <- training(split$splits[[1]]) 
+    d_out <- testing(split$splits[[1]])
+    
+    rec_in <- build_recipe(d_in, config)
+    
+    rec_prepped_in <- rec_in |> 
+      prep(training = d_in, strings_as_factors = FALSE)
+    
+    feat_in <- rec_prepped_in |> 
+      bake(new_data = NULL)
+    
+    feat_out <- rec_prepped_in |> 
+      bake(new_data = d_out)
+    
+    if (!exists("glm_family")) glm_family <- if_else(ml_mode == "regression", "gaussian", "binomial")
+    
+    # fit model on feat_in with config hyperparameter values 
+    model <- logistic_reg() %>% 
+      set_engine("glm", family = glm_family) %>% 
+      set_mode(ml_mode) %>% 
+      fit(y ~ .,
+          data = feat_in)
+    
+    # use get_metrics function to get a tibble that shows performance metrics
+    if (ml_mode == "classification") {
+      results <- get_metrics(model = model, feat_out = feat_out, ml_mode, 
+                             y_level_pos) %>% 
+        pivot_wider(., names_from = "metric",
+                    values_from = "estimate") %>%   
+        relocate(sens, spec, ppv, npv, accuracy, bal_accuracy, roc_auc) %>% 
+        bind_cols(config, .) 
+    } else {
+      results <- get_metrics(model = model, feat_out = feat_out, ml_mode) %>% 
+        bind_cols(config, .) 
+    }
   }
 }
 
