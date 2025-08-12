@@ -1,0 +1,1700 @@
+---
+title: "EDA Steps: Descriptives and Univariate Distributions"
+author: "Gaylen Fronk"
+format: html
+toc: true
+toc-depth: 4
+---
+
+## Setup
+
+Load libraries
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(gtsummary)
+library(labelled)
+```
+
+## Read in data
+
+```{r}
+d <- read_csv("~/Desktop/dahne_lab/moodivate/data_clean.csv", 
+              show_col_types = FALSE) |> 
+  # class outcome variable into clearly labeled levels
+  mutate(bdi_outcome = case_when(
+    bdi_outcome == 0 ~ "NonResponder",
+    bdi_outcome == 1 ~ "Responder",
+    TRUE ~ NA_character_)) |> 
+  mutate(bdi_outcome = factor(bdi_outcome)) |> 
+  rename(bdi_outcome_cat = bdi_outcome, bdi_outcome_cont = bdi_change_bl_w12,
+         bdi_baseline = bdi_score_w0) |> 
+  # remove BDI scores from other timepoints
+  select(-starts_with("bdi_score"), -starts_with("bdi_change")) |> 
+  # remove complete_activity_* variables (decided not useful)
+  select(-starts_with("complete_activity")) |> 
+  # standardize naming
+  rename_with(~ str_replace(.x, "_w", "_wk")) |> 
+  relocate(bdi_baseline, bdi_outcome_cat, bdi_outcome_cont) |> 
+  filter(!is.na(bdi_outcome_cat)) |> 
+  mutate(across(c(starts_with("total_time"), starts_with("average")),
+                ~ .x / 60)) |> 
+  glimpse()
+```
+
+### Create quartile variables
+
+Create BDI outcome quartiles categorical variable
+```{r}
+iqr1 <- quantile(d$bdi_outcome_cont)
+
+d <- d |> 
+  mutate(bdi_outcome_quartile = case_when(
+    bdi_outcome_cont <= iqr1[2] ~ "IQR 0-25",
+    bdi_outcome_cont <= iqr1[3] ~ "IQR 26-50",
+    bdi_outcome_cont <= iqr1[4] ~ "IQR 51-75",
+    bdi_outcome_cont <= iqr1[5] ~ "IQR 76-100",
+    TRUE ~ NA_character_
+  )) |> 
+  relocate(bdi_baseline, starts_with("bdi_outcome"), everything())
+```
+
+Create BDI outcome quartiles categorical variable
+```{r}
+iqr2 <- quantile(d$bdi_baseline)
+
+d <- d |> 
+  mutate(bdi_baseline_quartile = case_when(
+    bdi_baseline <= iqr2[2] ~ "IQR 0-25",
+    bdi_baseline <= iqr2[3] ~ "IQR 26-50",
+    bdi_baseline <= iqr2[4] ~ "IQR 51-75",
+    bdi_baseline <= iqr2[5] ~ "IQR 76-100",
+    TRUE ~ NA_character_
+  )) |> 
+  relocate(starts_with("bdi_baseline"), starts_with("bdi_outcome"), everything())
+```
+
+### Create long format version
+
+```{r}
+d_long <- d |> 
+  pivot_longer(cols = contains("_wk"),
+               names_to = c(".value", "week"),
+               names_pattern = "(.*)_wk(.*)") |> 
+  mutate(week = factor(as.numeric(week),
+                       levels = c(1:12),
+                       labels = str_c("Week ", 1:12))) |> 
+  glimpse()
+```
+
+### Set variable labels (helpful for `tbl_summary()`)
+
+Long format data
+```{r}
+d_long <- d_long |> 
+  set_variable_labels(
+    record_id = "Record ID",
+    bdi_baseline = "BDI Baseline",
+    bdi_baseline_quartile = "BDI Baseline Quartile",
+    bdi_outcome_cat = "Response Category (BDI)",
+    bdi_outcome_cont = "Raw Change from Baseline (BDI)",
+    bdi_outcome_quartile = "BDI Outcome Quartile",
+    week = "Week",
+    session_count = "Number of Sessions",
+    total_time = "Total Session Time",
+    average_session_time = "Average Session Time",
+    add_activity = "Number of Activities Added",
+    schedule_activity = "Number of Times User Used Scheduling Function",
+    scheduled_activities = "Number of Activities Scheduled",
+    completed_activities = "Number of Activities Completed",
+    add_goal = "Number of Goals Added",
+    badges_earned = "Number of Badges Earned"#,
+    # mood_days = "Number of Days Mood was Recorded",
+    # phq8_comp = "Whether PHQ8 was Completed (Y/N)"
+  )
+```
+
+Wide format data
+```{r}
+d <- d |>
+  set_variable_labels(
+    record_id = "Record ID",
+    bdi_baseline = "BDI Baseline",
+    bdi_baseline_quartile = "BDI Baseline Quartile",
+    bdi_outcome_cat = "Response Category (BDI)",
+    bdi_outcome_cont = "Raw Change from Baseline (BDI)",
+    bdi_outcome_quartile = "BDI Outcome Quartile",
+    session_count_wk1 = "Number of Sessions (Week 1)",
+    total_time_wk1 = "Total Session Time (Week 1)",
+    average_session_time_wk1 = "Average Session Time (Week 1)",
+    add_activity_wk1 = "Number of Activities Added (Week 1)",
+    schedule_activity_wk1 = "Number of Times User Used Scheduling Function (Week 1)",
+    scheduled_activities_wk1 = "Number of Activities Scheduled (Week 1)",
+    completed_activities_wk1 = "Number of Activities Completed (Week 1)",
+    add_goal_wk1 = "Number of Goals Added (Week 1)",
+    badges_earned_wk1 = "Number of Badges Earned (Week 1)",
+    # mood_days_wk1 = "Number of Days Mood was Recorded (Week 1)",
+    # phq8_comp_wk1 = "Completed PHQ8 (Week 1)",
+    session_count_wk2 = "Number of Sessions (Week 2)",
+    total_time_wk2 = "Total Session Time (Week 2)",
+    average_session_time_wk2 = "Average Session Time (Week 2)",
+    add_activity_wk2 = "Number of Activities Added (Week 2)",
+    schedule_activity_wk2 = "Number of Times User Used Scheduling Function (Week 2)",
+    scheduled_activities_wk2 = "Number of Activities Scheduled (Week 2)",
+    completed_activities_wk2 = "Number of Activities Completed (Week 2)",
+    add_goal_wk2 = "Number of Goals Added (Week 2)",
+    badges_earned_wk2 = "Number of Badges Earned (Week 2)",
+    # mood_days_wk2 = "Number of Days Mood was Recorded (Week 2)",
+    # phq8_comp_wk2 = "Completed PHQ8 (Week 2)",
+    session_count_wk3 = "Number of Sessions (Week 3)",
+    total_time_wk3 = "Total Session Time (Week 3)",
+    average_session_time_wk3 = "Average Session Time (Week 3)",
+    add_activity_wk3 = "Number of Activities Added (Week 3)",
+    schedule_activity_wk3 = "Number of Times User Used Scheduling Function (Week 3)",
+    scheduled_activities_wk3 = "Number of Activities Scheduled (Week 3)",
+    completed_activities_wk3 = "Number of Activities Completed (Week 3)",
+    add_goal_wk3 = "Number of Goals Added (Week 3)",
+    badges_earned_wk3 = "Number of Badges Earned (Week 3)",
+    # mood_days_wk3 = "Number of Days Mood was Recorded (Week 3)",
+    # phq8_comp_wk3 = "Completed PHQ8 (Week 3)",
+    session_count_wk4 = "Number of Sessions (Week 4)",
+    total_time_wk4 = "Total Session Time (Week 4)",
+    average_session_time_wk4 = "Average Session Time (Week 4)",
+    add_activity_wk4 = "Number of Activities Added (Week 4)",
+    schedule_activity_wk4 = "Number of Times User Used Scheduling Function (Week 4)",
+    scheduled_activities_wk4 = "Number of Activities Scheduled (Week 4)",
+    completed_activities_wk4 = "Number of Activities Completed (Week 4)",
+    add_goal_wk4 = "Number of Goals Added (Week 4)",
+    badges_earned_wk4 = "Number of Badges Earned (Week 4)",
+    # mood_days_wk4 = "Number of Days Mood was Recorded (Week 4)",
+    # phq8_comp_wk4 = "Completed PHQ8 (Week 4)",
+    session_count_wk5 = "Number of Sessions (Week 5)",
+    total_time_wk5 = "Total Session Time (Week 5)",
+    average_session_time_wk5 = "Average Session Time (Week 5)",
+    add_activity_wk5 = "Number of Activities Added (Week 5)",
+    schedule_activity_wk5 = "Number of Times User Used Scheduling Function (Week 5)",
+    scheduled_activities_wk5 = "Number of Activities Scheduled (Week 5)",
+    completed_activities_wk5 = "Number of Activities Completed (Week 5)",
+    add_goal_wk5 = "Number of Goals Added (Week 5)",
+    badges_earned_wk5 = "Number of Badges Earned (Week 5)",
+    # mood_days_wk5 = "Number of Days Mood was Recorded (Week 5)",
+    # phq8_comp_wk5 = "Completed PHQ8 (Week 5)"
+    session_count_wk6 = "Number of Sessions (Week 6)",
+    total_time_wk6 = "Total Session Time (Week 6)",
+    average_session_time_wk6 = "Average Session Time (Week 6)",
+    add_activity_wk6 = "Number of Activities Added (Week 6)",
+    schedule_activity_wk6 = "Number of Times User Used Scheduling Function (Week 6)",
+    scheduled_activities_wk6 = "Number of Activities Scheduled (Week 6)",
+    completed_activities_wk6 = "Number of Activities Completed (Week 6)",
+    add_goal_wk6 = "Number of Goals Added (Week 6)",
+    badges_earned_wk6 = "Number of Badges Earned (Week 6)",
+    # mood_days_wk6 = "Number of Days Mood was Recorded (Week 6)",
+    # phq8_comp_wk6 = "Completed PHQ8 (Week 6)"
+    session_count_wk7 = "Number of Sessions (Week 7)",
+    total_time_wk7 = "Total Session Time (Week 7)",
+    average_session_time_wk7 = "Average Session Time (Week 7)",
+    add_activity_wk7 = "Number of Activities Added (Week 7)",
+    schedule_activity_wk7 = "Number of Times User Used Scheduling Function (Week 7)",
+    scheduled_activities_wk7 = "Number of Activities Scheduled (Week 7)",
+    completed_activities_wk7 = "Number of Activities Completed (Week 7)",
+    add_goal_wk7 = "Number of Goals Added (Week 7)",
+    badges_earned_wk7 = "Number of Badges Earned (Week 7)",
+    # mood_days_wk7 = "Number of Days Mood was Recorded (Week 7)",
+    # phq8_comp_wk7 = "Completed PHQ8 (Week 7)"
+    session_count_wk8 = "Number of Sessions (Week 8)",
+    total_time_wk8 = "Total Session Time (Week 8)",
+    average_session_time_wk8 = "Average Session Time (Week 8)",
+    add_activity_wk8 = "Number of Activities Added (Week 8)",
+    schedule_activity_wk8 = "Number of Times User Used Scheduling Function (Week 8)",
+    scheduled_activities_wk8 = "Number of Activities Scheduled (Week 8)",
+    completed_activities_wk8 = "Number of Activities Completed (Week 8)",
+    add_goal_wk8 = "Number of Goals Added (Week 8)",
+    badges_earned_wk8 = "Number of Badges Earned (Week 8)",
+    # mood_days_wk8 = "Number of Days Mood was Recorded (Week 8)",
+    # phq8_comp_wk8 = "Completed PHQ8 (Week 8)"
+    session_count_wk9 = "Number of Sessions (Week 9)",
+    total_time_wk9 = "Total Session Time (Week 9)",
+    average_session_time_wk9 = "Average Session Time (Week 9)",
+    add_activity_wk9 = "Number of Activities Added (Week 9)",
+    schedule_activity_wk9 = "Number of Times User Used Scheduling Function (Week 9)",
+    scheduled_activities_wk9 = "Number of Activities Scheduled (Week 9)",
+    completed_activities_wk9 = "Number of Activities Completed (Week 9)",
+    add_goal_wk9 = "Number of Goals Added (Week 9)",
+    badges_earned_wk9 = "Number of Badges Earned (Week 9)",
+    # mood_days_wk9 = "Number of Days Mood was Recorded (Week 9)",
+    # phq8_comp_wk9 = "Completed PHQ8 (Week 9)"
+    session_count_wk10 = "Number of Sessions (Week 10)",
+    total_time_wk10 = "Total Session Time (Week 10)",
+    average_session_time_wk10 = "Average Session Time (Week 10)",
+    add_activity_wk10 = "Number of Activities Added (Week 10)",
+    schedule_activity_wk10 = "Number of Times User Used Scheduling Function (Week 10)",
+    scheduled_activities_wk10 = "Number of Activities Scheduled (Week 10)",
+    completed_activities_wk10 = "Number of Activities Completed (Week 10)",
+    add_goal_wk10 = "Number of Goals Added (Week 10)",
+    badges_earned_wk10 = "Number of Badges Earned (Week 10)",
+    # mood_days_wk10 = "Number of Days Mood was Recorded (Week 10)",
+    # phq8_comp_wk10 = "Completed PHQ8 (Week 10)"
+    session_count_wk11 = "Number of Sessions (Week 11)",
+    total_time_wk11 = "Total Session Time (Week 11)",
+    average_session_time_wk11 = "Average Session Time (Week 11)",
+    add_activity_wk11 = "Number of Activities Added (Week 11)",
+    schedule_activity_wk11 = "Number of Times User Used Scheduling Function (Week 11)",
+    scheduled_activities_wk11 = "Number of Activities Scheduled (Week 11)",
+    completed_activities_wk11 = "Number of Activities Completed (Week 11)",
+    add_goal_wk11 = "Number of Goals Added (Week 11)",
+    badges_earned_wk11 = "Number of Badges Earned (Week 11)",
+    # mood_days_wk11 = "Number of Days Mood was Recorded (Week 11)",
+    # phq8_comp_wk11 = "Completed PHQ8 (Week 11)"
+    session_count_wk12 = "Number of Sessions (Week 12)",
+    total_time_wk12 = "Total Session Time (Week 12)",
+    average_session_time_wk12 = "Average Session Time (Week 12)",
+    add_activity_wk12 = "Number of Activities Added (Week 12)",
+    schedule_activity_wk12 = "Number of Times User Used Scheduling Function (Week 12)",
+    scheduled_activities_wk12 = "Number of Activities Scheduled (Week 12)",
+    completed_activities_wk12 = "Number of Activities Completed (Week 12)",
+    add_goal_wk12 = "Number of Goals Added (Week 12)",
+    badges_earned_wk12 = "Number of Badges Earned (Week 12)"#,
+    # mood_days_wk12 = "Number of Days Mood was Recorded (Week 12)",
+    # phq8_comp_wk12 = "Completed PHQ8 (Week 12)"
+  )
+```
+
+## Categorical Outcome (Responder vs. Non-Responder)
+
+### Descriptives Table
+
+#### Build table
+
+Create summary table using `tbl_summary()`
+
+```{r}
+tblsum_cat_object <- d |>
+  tbl_summary(by = bdi_outcome_cat,
+              include = !c(record_id, contains("outcome"), contains("quartile")),
+              digits = all_continuous() ~ 2
+  ) |>
+  add_overall() |>
+  modify_header(label ~ "Predictor") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "Response Category (BDI)") |>
+  add_p(test = list(
+    c("bdi_baseline") ~ "t.test",
+    c(contains("session"), starts_with("total"),
+      starts_with("add"), contains("activit"),
+      starts_with("badges")) ~ "wilcox.test"#,
+    # c("mood_days_wk1", "mood_days_wk2", "mood_days_wk3",
+    #   starts_with("phq8")) ~ "chisq.test",
+    # c("mood_days_wk4") ~ "fisher.test"
+  ),
+  pvalue_fun = label_style_pvalue(digits = 3))
+
+tblsum_cat <- as_tibble(tblsum_cat_object)
+
+tblsum_cat <- tblsum_cat |> 
+  mutate(week = str_extract(Predictor, "Week [:digit:]{1,2}")) |> 
+  mutate(Predictor = str_replace(Predictor, " \\(Week [:digit:]{1,2}\\)", "")) |> 
+  mutate(Predictor = str_replace(Predictor, "[:digit:]+", ""))
+
+tblsum_cat <- tblsum_cat |> 
+  relocate(Predictor, week) |> 
+  filter(!is.na(Predictor) & Predictor != "")
+```
+
+Create table manually to organize how we wanted it
+```{r}
+d_sum_group <- d_long |> 
+  rename_with(~ str_replace_all(.x, "_", "")) |> 
+  group_by(bdioutcomecat, week) |> 
+  summarize(across(c(bdibaseline, sessioncount:badgesearned),
+                   c(mean, sd))) |> 
+  rename_with(~ str_replace(.x, "_1", "_mean")) |> 
+  rename_with(~ str_replace(.x, "_2", "_sd")) |> 
+  mutate(across(c(ends_with("mean"), ends_with("sd")),
+                ~ round(.x, digits = 2))) |> 
+  ungroup() |> 
+  pivot_longer(
+    cols = c(ends_with("mean"), ends_with("sd")),
+    names_to = c("Predictor", ".value"),
+    names_sep = "_"
+  ) |> 
+  pivot_wider(
+    names_from = bdioutcomecat,
+    values_from = c(mean, sd),
+    names_glue = "{.value}_{bdioutcomecat}"
+  ) |> 
+  arrange(Predictor, week) |> 
+  relocate(Predictor, week) |> 
+  glimpse()
+
+d_sum_overall <- d_long |> 
+  rename_with(~ str_replace_all(.x, "_", "")) |> 
+  group_by(week) |> 
+  summarize(across(c(bdibaseline, sessioncount:badgesearned),
+                   c(mean, sd))) |> 
+  rename_with(~ str_replace(.x, "_1", "_mean")) |> 
+  rename_with(~ str_replace(.x, "_2", "_sd")) |> 
+  mutate(across(c(ends_with("mean"), ends_with("sd")),
+                ~ round(.x, digits = 2))) |> 
+  ungroup() |> 
+  pivot_longer(
+    cols = c(ends_with("mean"), ends_with("sd")),
+    names_to = c("Predictor", ".value"),
+    names_sep = "_"
+  ) |> 
+  mutate(overall = "Overall") |> 
+  pivot_wider(
+    names_from = overall,
+    values_from = c(mean, sd),
+    names_glue = "{.value}_{overall}"
+  ) |> 
+  arrange(Predictor, week) |> 
+  relocate(Predictor, week) |> 
+  glimpse()
+
+d_table <- left_join(d_sum_group, d_sum_overall, 
+                     by = c("Predictor", "week")) |> 
+  relocate(Predictor, week, ends_with("Overall"),
+           ends_with("NonResponder"),
+           everything())
+
+d_table <- d_table |> 
+  mutate(Predictor = 
+           case_match(Predictor,
+                      "bdibaseline" ~ "BDI Baseline",
+                      "sessioncount" ~ "Number of Sessions",
+                      "totaltime" ~ "Total Session Time",
+                      "averagesessiontime" ~ "Average Session Time",
+                      "addactivity" ~ "Number of Activities Added",
+                      "scheduleactivity" ~ "Number of Times User Used Scheduling Function",
+                      "scheduledactivities" ~ "Number of Activities Scheduled",
+                      "completedactivities" ~ "Number of Activities Completed",
+                      "addgoal" ~ "Number of Goals Added",
+                      "badgesearned" ~ "Number of Badges Earned",
+                      "mooddays" ~ "Number of Days Mood was Recorded",
+                      "phq8comp" ~ "Completed PHQ8")) |> 
+  filter(!(Predictor == "BDI Baseline" & week %in% c("Week 2", "Week 3", "Week 4",
+                                                     "Week 5", "Week 6", "Week 7",
+                                                     "Week 8", "Week 9", "Week 10",
+                                                     "Week 11", "Week 12"))) |> 
+  mutate(week = case_when(
+    Predictor == "BDI Baseline" ~ NA_character_,
+    TRUE ~ week
+  ))
+
+```
+
+Combine with tblsum stats
+```{r}
+d_table_with_stat <- tblsum_cat |> 
+  select(Predictor, week, `**p-value**`) |> 
+  left_join(d_table, by = c("Predictor", "week")) |> 
+  rename(Week = week, `Group Difference` = `**p-value**`) |> 
+  relocate(Predictor, Week, contains("overall"), contains("Non"), 
+           ends_with("_Responder"), `Group Difference`)
+```
+
+Improve
+```{r}
+tbl_final <- d_table_with_stat |> 
+  rowwise() |> 
+  mutate(`Overall M (SD)` = str_c(mean_Overall, " (", sd_Overall, ")"),
+         `Non-Responder M (SD)` = str_c(mean_NonResponder, 
+                                        " (", sd_NonResponder, ")"),
+         `Responder M (SD)` = str_c(mean_Responder, 
+                                    " (", sd_Responder, ")")) |> 
+  ungroup() |> 
+  select(Predictor, Week, contains("M (SD)"), `Group Difference`) |> 
+  mutate(Predictor = c("BDI Baseline", rep("", 108))) |> 
+  # add_row(Predictor = "Completed PHQ8",
+  #         .before = 38) |> 
+  # add_row(Predictor = "Number of Days Mood was Recorded",
+  #         .before = 34) |> 
+  add_row(Predictor = "Number of Badges Earned",
+          .before = 98) |>
+  add_row(Predictor = "Number of Goals Added",
+          .before = 86) |>
+  add_row(Predictor = "Number of Activities Completed",
+          .before = 74) |>
+  add_row(Predictor = "Number of Activities Scheduled",
+          .before = 62) |>
+  add_row(Predictor = "Number of Times User Used Scheduling Function",
+          .before = 50) |> 
+  add_row(Predictor = "Number of Activities Added",
+          .before = 38) |>
+  add_row(Predictor = "Average Session Time (Minutes)",
+          .before = 26) |>
+  add_row(Predictor = "Total Session Time (Minutes)",
+          .before = 14) |>
+  add_row(Predictor = "Number of Sessions",
+          .before = 2) |> 
+  replace_na(list(Predictor = "",
+                  Week = "",
+                  `Overall M (SD)` = "",
+                  `Non-Responder M (SD)` = "",
+                  `Responder M (SD)` = "",
+                  `Group Difference` = "")) 
+```
+
+#### View table nicely
+```{r}
+knitr::kable(tbl_final)
+```
+
+### Univariate distributions (by outcome class)
+
+BDI Baseline
+```{r}
+d_long |> 
+  ggplot(aes(x = bdi_baseline, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_wrap(vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "BDI Baseline")
+```
+
+Session Count
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = session_count, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Session Count (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = session_count, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Session Count (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = session_count, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Session Count (Weeks 9-12)")
+```
+
+Total time
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = total_time, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Total Time in Minutes (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = total_time, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Total Time in Minutes (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = total_time, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Total Time in Minutes (Weeks 9-12)")
+```
+
+Average session time
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = average_session_time, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Average Session Time in Minutes (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = average_session_time, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Average Session Time in Minutes (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = average_session_time, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Average Session Time in Minutes (Weeks 9-12)")
+```
+
+Add activity
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = add_activity, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Added (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = add_activity, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Added (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = add_activity, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Added (Weeks 9-12)")
+```
+
+Scheduling function
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = schedule_activity, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Times User Used Scheduling Function (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = schedule_activity, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Times User Used Scheduling Function (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = schedule_activity, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Times User Used Scheduling Function (Weeks 9-12)")
+```
+
+Scheduled activities
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = scheduled_activities, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Scheduled (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = scheduled_activities, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Scheduled (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = scheduled_activities, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Scheduled (Weeks 9-12)")
+```
+
+Completed activities
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = completed_activities, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Completed (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = completed_activities, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Completed (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = completed_activities, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Completed (Weeks 9-12)")
+```
+
+Add goal
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = add_goal, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Goals Added (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = add_goal, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Goals Added (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = add_goal, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Goals Added (Weeks 9-12)")
+```
+
+Badges earned
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = badges_earned, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Badges Earned (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = badges_earned, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Badges Earned (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = badges_earned, fill = bdi_outcome_cat)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Badges Earned (Weeks 9-12)")
+```
+
+Mood days
+```{r, eval=FALSE, include=FALSE}
+d_long |> 
+  ggplot(aes(x = mood_days, fill = bdi_outcome_cat)) +
+  geom_bar() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Days Mood was Recorded")
+```
+
+PHQ8
+```{r, eval = FALSE, include=FALSE}
+d_long |> 
+  mutate(phq8_comp = if_else(phq8_comp == 0, "no", "yes")) |> 
+  ggplot(aes(x = phq8_comp, fill = bdi_outcome_cat)) +
+  geom_bar() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_cat)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Whether PHQ8 was Completed")
+```
+
+## Continuous outcome (change in BDI score from baseline --> Week 12)
+
+### Descriptives Table
+
+#### Build table
+
+Create summary table using `tbl_summary()`
+
+```{r}
+tblsum_iqr_object <- d |>
+  tbl_summary(by = bdi_outcome_quartile,
+              include = !c(record_id, bdi_outcome_cat, bdi_outcome_cont,
+                           bdi_outcome_quartile, bdi_baseline_quartile),
+              digits = all_continuous() ~ 2
+  ) |>
+  modify_header(label ~ "Predictor") |>
+  modify_spanning_header(c("stat_1", "stat_2", "stat_3", "stat_4") ~ "BDI Quartile") |>
+  add_p(test.args = c("add_goal_wk2", "badges_earned_wk10",
+                      "badges_earned_wk11", "badges_earned_wk8") ~ list(
+                        simulate.p.value = TRUE
+                      ),
+  pvalue_fun = label_style_pvalue(digits = 3))
+
+tblsum_iqr <- as_tibble(tblsum_iqr_object)
+
+tblsum_iqr <- tblsum_iqr |> 
+  mutate(week = str_extract(Predictor, "Week [:digit:]{1,2}")) |> 
+  mutate(Predictor = str_replace(Predictor, " \\(Week [:digit:]{1,2}\\)", "")) |> 
+  mutate(Predictor = str_replace(Predictor, "[:digit:]+", ""))
+
+tblsum_iqr <- tblsum_iqr |> 
+  relocate(Predictor, week) |> 
+  filter(!is.na(Predictor) & Predictor != "")
+```
+
+Create table manually to organize how we wanted it
+```{r}
+d_sum_iqr <- d_long |> 
+  rename_with(~ str_replace_all(.x, "_", "")) |> 
+  group_by(bdioutcomequartile, week) |> 
+  summarize(across(c(bdibaseline, sessioncount:badgesearned),
+                   c(mean, sd))) |> 
+  rename_with(~ str_replace(.x, "_1", "_mean")) |> 
+  rename_with(~ str_replace(.x, "_2", "_sd")) |> 
+  mutate(across(c(ends_with("mean"), ends_with("sd")),
+                ~ round(.x, digits = 2))) |> 
+  ungroup() |> 
+  pivot_longer(
+    cols = c(ends_with("mean"), ends_with("sd")),
+    names_to = c("Predictor", ".value"),
+    names_sep = "_"
+  ) |> 
+  pivot_wider(
+    names_from = bdioutcomequartile,
+    values_from = c(mean, sd),
+    names_glue = "{.value}_{bdioutcomequartile}"
+  ) |> 
+  arrange(Predictor, week) |> 
+  relocate(Predictor, week) |> 
+  glimpse()
+
+d_table_iqr <- left_join(d_sum_iqr, d_sum_overall, 
+                     by = c("Predictor", "week")) |> 
+  relocate(Predictor, week, ends_with("Overall"),
+           ends_with("25"), ends_with("50"), ends_with("75"), ends_with("100"),
+           everything())
+
+d_table_iqr <- d_table_iqr |> 
+  mutate(Predictor = 
+           case_match(Predictor,
+                      "bdibaseline" ~ "BDI Baseline",
+                      "sessioncount" ~ "Number of Sessions",
+                      "totaltime" ~ "Total Session Time",
+                      "averagesessiontime" ~ "Average Session Time",
+                      "addactivity" ~ "Number of Activities Added",
+                      "scheduleactivity" ~ "Number of Times User Used Scheduling Function",
+                      "scheduledactivities" ~ "Number of Activities Scheduled",
+                      "completedactivities" ~ "Number of Activities Completed",
+                      "addgoal" ~ "Number of Goals Added",
+                      "badgesearned" ~ "Number of Badges Earned",
+                      "mooddays" ~ "Number of Days Mood was Recorded",
+                      "phq8comp" ~ "Completed PHQ8")) |> 
+  filter(!(Predictor == "BDI Baseline" & week %in% c("Week 2", "Week 3", "Week 4",
+                                                     "Week 5", "Week 6", "Week 7",
+                                                     "Week 8", "Week 9", "Week 10",
+                                                     "Week 11", "Week 12"))) |> 
+  mutate(week = case_when(
+    Predictor == "BDI Baseline" ~ NA_character_,
+    TRUE ~ week
+  ))
+
+```
+
+Combine with tblsum stats
+```{r}
+d_table_with_stat_iqr <- tblsum_iqr |> 
+  select(Predictor, week, `**p-value**`) |> 
+  left_join(d_table_iqr, by = c("Predictor", "week")) |> 
+  rename(Week = week, `Group Difference` = `**p-value**`) |> 
+  relocate(Predictor, Week, ends_with("Overall"),
+           ends_with("25"), ends_with("50"), ends_with("75"), ends_with("100"),
+           everything())
+```
+
+Improve
+```{r}
+tbl_final_iqr <- d_table_with_stat_iqr |> 
+  rowwise() |> 
+  mutate(`Overall M (SD)` = str_c(mean_Overall, " (", sd_Overall, ")"),
+         `IQR 0-25 M (SD)` = str_c(`mean_IQR 0-25`, 
+                                        " (", `sd_IQR 0-25`, ")"),
+         `IQR 26-50 M (SD)` = str_c(`mean_IQR 26-50`, 
+                                        " (", `sd_IQR 26-50`, ")"),
+         `IQR 51-75 M (SD)` = str_c(`mean_IQR 51-75`, 
+                                        " (", `sd_IQR 51-75`, ")"),
+         `IQR 76-100 M (SD)` = str_c(`mean_IQR 76-100`, 
+                                        " (", `sd_IQR 76-100`, ")")) |> 
+  ungroup() |> 
+  select(Predictor, Week, contains("M (SD)"), `Group Difference`) |> 
+  mutate(Predictor = c("BDI Baseline", rep("", 108))) |> 
+  # add_row(Predictor = "Completed PHQ8",
+  #         .before = 38) |> 
+  # add_row(Predictor = "Number of Days Mood was Recorded",
+  #         .before = 34) |> 
+  add_row(Predictor = "Number of Badges Earned",
+          .before = 98) |>
+  add_row(Predictor = "Number of Goals Added",
+          .before = 86) |>
+  add_row(Predictor = "Number of Activities Completed",
+          .before = 74) |>
+  add_row(Predictor = "Number of Activities Scheduled",
+          .before = 62) |>
+  add_row(Predictor = "Number of Times User Used Scheduling Function",
+          .before = 50) |> 
+  add_row(Predictor = "Number of Activities Added",
+          .before = 38) |>
+  add_row(Predictor = "Average Session Time (Minutes)",
+          .before = 26) |>
+  add_row(Predictor = "Total Session Time (Minutes)",
+          .before = 14) |>
+  add_row(Predictor = "Number of Sessions",
+          .before = 2) |> 
+  replace_na(list(Predictor = "",
+                  Week = "",
+                  `Overall M (SD)` = "",
+                  `IQR 0-25 M (SD)` = "",
+                  `IQR 26-50 M (SD)` = "",
+                  `IQR 51-75 M (SD)` = "",
+                  `IQR 76-100 M (SD)` = "",
+                  `Group Difference` = "")) 
+```
+
+#### View table nicely
+```{r}
+knitr::kable(tbl_final_iqr)
+```
+
+### Univariate distributions (by outcome quartile)
+
+BDI Baseline
+```{r}
+d_long |> 
+  ggplot(aes(x = bdi_baseline, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_wrap(vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "BDI Baseline")
+```
+
+Session Count
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = session_count, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Session Count (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = session_count, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Session Count (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = session_count, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Session Count (Weeks 9-12)")
+```
+
+Total time
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = total_time, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Total Time in Minutes (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = total_time, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Total Time in Minutes (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = total_time, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Total Time in Minutes (Weeks 9-12)")
+```
+
+Average session time
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = average_session_time, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Average Session Time in Minutes (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = average_session_time, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Average Session Time in Minutes (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = average_session_time, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Average Session Time in Minutes (Weeks 9-12)")
+```
+
+Add activity
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = add_activity, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Added (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = add_activity, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Added (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = add_activity, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Added (Weeks 9-12)")
+```
+
+Scheduling function
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = schedule_activity, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Times User Used Scheduling Function (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = schedule_activity, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Times User Used Scheduling Function (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = schedule_activity, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Times User Used Scheduling Function (Weeks 9-12)")
+```
+
+Scheduled activities
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = scheduled_activities, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Scheduled (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = scheduled_activities, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Scheduled (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = scheduled_activities, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Scheduled (Weeks 9-12)")
+```
+
+Completed activities
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = completed_activities, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Completed (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = completed_activities, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Completed (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = completed_activities, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Completed (Weeks 9-12)")
+```
+
+Add goal
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = add_goal, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Goals Added (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = add_goal, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Goals Added (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = add_goal, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Goals Added (Weeks 9-12)")
+```
+
+Badges earned
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = badges_earned, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Badges Earned (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = badges_earned, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Badges Earned (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = badges_earned, fill = bdi_outcome_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_outcome_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Badges Earned (Weeks 9-12)")
+```
+
+## Across BDI baseline values (quartiles)
+
+### Descriptives Table
+
+#### Build table
+
+Create summary table using `tbl_summary()`
+```{r}
+tblsum_iqr2_object <- d |>
+  tbl_summary(by = bdi_baseline_quartile,
+              include = !c(record_id, starts_with("bdi")),
+              digits = all_continuous() ~ 2
+  ) |>
+  modify_header(label ~ "Predictor") |>
+  modify_spanning_header(c("stat_1", "stat_2", 
+                           "stat_3", "stat_4") ~ "BDI Baseline Quartile") |>
+  add_p(test.args = c("add_goal_wk2", "badges_earned_wk10",
+                      "badges_earned_wk11", "badges_earned_wk8") ~ list(
+                        simulate.p.value = TRUE
+                      ),
+  pvalue_fun = label_style_pvalue(digits = 3))
+
+tblsum_iqr2 <- as_tibble(tblsum_iqr2_object)
+
+tblsum_iqr2 <- tblsum_iqr2 |> 
+  mutate(week = str_extract(Predictor, "Week [:digit:]{1,2}")) |> 
+  mutate(Predictor = str_replace(Predictor, " \\(Week [:digit:]{1,2}\\)", "")) |> 
+  mutate(Predictor = str_replace(Predictor, "[:digit:]+", ""))
+
+tblsum_iqr2 <- tblsum_iqr2 |> 
+  relocate(Predictor, week) |> 
+  filter(!is.na(Predictor) & Predictor != "")
+```
+
+Create table manually to organize how we wanted it
+```{r}
+d_sum_iqr2 <- d_long |> 
+  rename_with(~ str_replace_all(.x, "_", "")) |> 
+  group_by(bdibaselinequartile, week) |> 
+  summarize(across(c(sessioncount:badgesearned),
+                   c(mean, sd))) |> 
+  rename_with(~ str_replace(.x, "_1", "_mean")) |> 
+  rename_with(~ str_replace(.x, "_2", "_sd")) |> 
+  mutate(across(c(ends_with("mean"), ends_with("sd")),
+                ~ round(.x, digits = 2))) |> 
+  ungroup() |> 
+  pivot_longer(
+    cols = c(ends_with("mean"), ends_with("sd")),
+    names_to = c("Predictor", ".value"),
+    names_sep = "_"
+  ) |> 
+  pivot_wider(
+    names_from = bdibaselinequartile,
+    values_from = c(mean, sd),
+    names_glue = "{.value}_{bdibaselinequartile}"
+  ) |> 
+  arrange(Predictor, week) |> 
+  relocate(Predictor, week) |> 
+  glimpse()
+
+d_table_iqr2 <- left_join(d_sum_iqr2, d_sum_overall, 
+                     by = c("Predictor", "week")) |> 
+  relocate(Predictor, week, ends_with("Overall"),
+           ends_with("25"), ends_with("50"), ends_with("75"), ends_with("100"),
+           everything())
+
+d_table_iqr2 <- d_table_iqr2 |> 
+  mutate(Predictor = 
+           case_match(Predictor,
+                      "bdibaseline" ~ "BDI Baseline",
+                      "sessioncount" ~ "Number of Sessions",
+                      "totaltime" ~ "Total Session Time",
+                      "averagesessiontime" ~ "Average Session Time",
+                      "addactivity" ~ "Number of Activities Added",
+                      "scheduleactivity" ~ "Number of Times User Used Scheduling Function",
+                      "scheduledactivities" ~ "Number of Activities Scheduled",
+                      "completedactivities" ~ "Number of Activities Completed",
+                      "addgoal" ~ "Number of Goals Added",
+                      "badgesearned" ~ "Number of Badges Earned",
+                      "mooddays" ~ "Number of Days Mood was Recorded",
+                      "phq8comp" ~ "Completed PHQ8")) 
+
+```
+
+Combine with tblsum stats
+```{r}
+d_table_with_stat_iqr2 <- tblsum_iqr2 |> 
+  select(Predictor, week, `**p-value**`) |> 
+  left_join(d_table_iqr2, by = c("Predictor", "week")) |> 
+  rename(Week = week, `Group Difference` = `**p-value**`) |> 
+  relocate(Predictor, Week, contains("overall"), 
+           ends_with("25"), ends_with("50"), 
+           ends_with("75"), ends_with("100"),`Group Difference`)
+```
+
+Improve
+```{r}
+tbl_final_iqr2 <- d_table_with_stat_iqr2 |> 
+  rowwise() |> 
+  mutate(`Overall M (SD)` = str_c(mean_Overall, " (", sd_Overall, ")"),
+         `IQR 0-25 M (SD)` = str_c(`mean_IQR 0-25`, 
+                                        " (", `sd_IQR 0-25`, ")"),
+         `IQR 26-50 M (SD)` = str_c(`mean_IQR 26-50`, 
+                                        " (", `sd_IQR 26-50`, ")"),
+         `IQR 51-75 M (SD)` = str_c(`mean_IQR 51-75`, 
+                                        " (", `sd_IQR 51-75`, ")"),
+         `IQR 76-100 M (SD)` = str_c(`mean_IQR 76-100`, 
+                                        " (", `sd_IQR 76-100`, ")")) |> 
+  ungroup() |> 
+  select(Predictor, Week, contains("M (SD)"), `Group Difference`) |> 
+  mutate(Predictor = rep("", 108)) |> 
+  # add_row(Predictor = "Completed PHQ8",
+  #         .before = 38) |> 
+  # add_row(Predictor = "Number of Days Mood was Recorded",
+  #         .before = 34) |> 
+  add_row(Predictor = "Number of Badges Earned",
+          .before = 97) |>
+  add_row(Predictor = "Number of Goals Added",
+          .before = 85) |>
+  add_row(Predictor = "Number of Activities Completed",
+          .before = 73) |>
+  add_row(Predictor = "Number of Activities Scheduled",
+          .before = 61) |>
+  add_row(Predictor = "Number of Times User Used Scheduling Function",
+          .before = 49) |> 
+  add_row(Predictor = "Number of Activities Added",
+          .before = 37) |>
+  add_row(Predictor = "Average Session Time (Minutes)",
+          .before = 25) |>
+  add_row(Predictor = "Total Session Time (Minutes)",
+          .before = 13) |>
+  add_row(Predictor = "Number of Sessions",
+          .before = 1) |> 
+  replace_na(list(Predictor = "",
+                  Week = "",
+                  `Overall M (SD)` = "",
+                  `IQR 0-25 M (SD)` = "",
+                  `IQR 26-50 M (SD)` = "",
+                  `IQR 51-75 M (SD)` = "",
+                  `IQR 76-100 M (SD)` = "",
+                  `Group Difference` = "")) 
+```
+
+#### View table nicely
+```{r}
+knitr::kable(tbl_final_iqr2)
+```
+
+### Univariate distributions (by BDI baseline quartile)
+
+Session Count
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = session_count, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Session Count (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = session_count, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Session Count (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = session_count, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Session Count (Weeks 9-12)")
+```
+
+Total time
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = total_time, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Total Time in Minutes (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = total_time, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Total Time in Minutes (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = total_time, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Total Time in Minutes (Weeks 9-12)")
+```
+
+Average session time
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = average_session_time, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Average Session Time in Minutes (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = average_session_time, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Average Session Time in Minutes (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = average_session_time, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Average Session Time in Minutes (Weeks 9-12)")
+```
+
+Add activity
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = add_activity, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Added (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = add_activity, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Added (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = add_activity, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Added (Weeks 9-12)")
+```
+
+Scheduling function
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = schedule_activity, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Times User Used Scheduling Function (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = schedule_activity, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Times User Used Scheduling Function (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = schedule_activity, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Times User Used Scheduling Function (Weeks 9-12)")
+```
+
+Scheduled activities
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = scheduled_activities, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Scheduled (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = scheduled_activities, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Scheduled (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = scheduled_activities, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Scheduled (Weeks 9-12)")
+```
+
+Completed activities
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = completed_activities, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Completed (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = completed_activities, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Completed (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = completed_activities, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Activities Completed (Weeks 9-12)")
+```
+
+Add goal
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = add_goal, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Goals Added (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = add_goal, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Goals Added (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = add_goal, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Goals Added (Weeks 9-12)")
+```
+
+Badges earned
+```{r}
+d_long |> 
+  filter(week %in% c("Week 1", "Week 2", "Week 3", "Week 4")) |> 
+  ggplot(aes(x = badges_earned, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Badges Earned (Weeks 1-4)")
+
+d_long |> 
+  filter(week %in% c("Week 5", "Week 6", "Week 7", "Week 8")) |> 
+  ggplot(aes(x = badges_earned, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Badges Earned (Weeks 5-8)")
+
+d_long |> 
+  filter(week %in% c("Week 9", "Week 10", "Week 11", "Week 12")) |> 
+  ggplot(aes(x = badges_earned, fill = bdi_baseline_quartile)) +
+  geom_histogram() +
+  facet_grid(rows = vars(week),
+             cols = vars(bdi_baseline_quartile)) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = "Number of Badges Earned (Weeks 9-12)")
+```
+
+
+
+
+
+
+
+
+
+
+
+
