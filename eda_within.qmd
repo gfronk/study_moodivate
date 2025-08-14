@@ -1,0 +1,40 @@
+---
+title: "EDA: Within-Subjects Feature Engineering"
+author: "Gaylen"
+format: html
+---
+
+# Setup
+
+Load libraries
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(gtsummary)
+library(labelled)
+```
+
+## Read in data
+
+```{r}
+d <- read_csv("~/Desktop/dahne_lab/moodivate/data_clean.csv", 
+              show_col_types = FALSE) |> 
+  # class outcome variable into clearly labeled levels
+  mutate(bdi_outcome = case_when(
+    bdi_outcome == 0 ~ "NonResponder",
+    bdi_outcome == 1 ~ "Responder",
+    TRUE ~ NA_character_)) |> 
+  mutate(bdi_outcome = factor(bdi_outcome)) |> 
+  rename(bdi_outcome_cat = bdi_outcome, bdi_outcome_cont = bdi_change_bl_w12,
+         bdi_baseline = bdi_score_w0) |> 
+  # remove BDI scores from other timepoints
+  select(-starts_with("bdi_score"), -starts_with("bdi_change")) |> 
+  # remove complete_activity_* variables (decided not useful)
+  select(-starts_with("complete_activity")) |> 
+  # standardize naming
+  rename_with(~ str_replace(.x, "_w", "_wk")) |> 
+  relocate(bdi_baseline, bdi_outcome_cat, bdi_outcome_cont) |> 
+  filter(!is.na(bdi_outcome_cat)) |> 
+  mutate(across(c(starts_with("total_time"), starts_with("average")),
+                ~ .x / 60)) |> 
+  glimpse()
+```
