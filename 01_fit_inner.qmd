@@ -10,6 +10,7 @@ Load libraries
 ```{r, message = FALSE}
 library(glmnet)
 library(tidyverse)
+library(furrr)
 library(tidymodels)
 ```
 
@@ -21,18 +22,8 @@ This functions file (fun_moodivate.R) contains many functions that are used thro
 
 ## Read in data
 
-To ensure all proposed analyses are feasible and to specify analysis steps as precisely as possible, **we conduct our proposed analyses using a shuffled (i.e., randomized) version of our dataset**. Following testing, our analyses will follow these scripts exactly using our real data.
-
-To create our shuffled dataset, we randomly sample (without replacement) **EVAN: IS THIS TRUE?** the outcome variable (`bdi_outcome`, which will later be renamed to `y`). This process:
-
-* Breaks any relationship between the outcome and predictor variables
-
-* Maintains any possible relationships among predictor variables
-
-* Maintains the exact data structure (variable types, outcome variable distribution, predictor variable distributions)
-
 ```{r}
-d <- read_csv("~/Desktop/dahne_lab/moodivate/data_clean.csv", 
+d <- read_csv("~/Desktop/musc/dahne_lab/moodivate/data_clean.csv", 
               show_col_types = FALSE) |> 
   glimpse()
 ```
@@ -41,11 +32,12 @@ d <- read_csv("~/Desktop/dahne_lab/moodivate/data_clean.csv",
 
 ### Set up outcome variable levels
 
-We define our outcome variable (y_col_name) as `bdi_outcome`, which will be renamed as `y` to facilitate using cross-study functions and code. The two levels of the outcome variable (non-responder and responder) are set to have non-responder as the positive (event) level, as our goal is to identify non-responders to the Moodivate DMHI who should be stepped up to a higher level of care.
+We define our outcome variable (y_col_name) as `phq9_outcome`, which will be renamed as `y` to facilitate using cross-study functions and code. The two levels of the outcome variable (non-responder and responder) are set to have non-responder as the positive (event) level, as our goal is to identify non-responders to the Moodivate DMHI who should be stepped up to a higher level of care.
 ```{r}
-y_col_name <- "bdi_outcome"
+y_col_name <- "phq9_outcome_cat"
 y_level_pos <- "non_responder"
 y_level_neg <- "responder"
+y_baseline <- "phq9_baseline"
 ```
 
 ### Class variables & set factor levels
@@ -55,19 +47,36 @@ d <- d |>
   # rename outcome to y
   rename(y = !!y_col_name) |> 
   mutate(y = case_when(
-    y == 0 ~ "non_responder",
-    y == 1 ~ "responder",
+    y == "NonResponder" ~ "non_responder",
+    y == "Responder" ~ "responder",
     TRUE ~ NA_character_)) %>% 
   # y as a factor with two levels, positive level first
   mutate(y = factor(y, levels = c(!!y_level_pos,
                                   !!y_level_neg))) |> 
-  # standardize naming
-  rename_with(~ str_replace(.x, "_w1", "_wk1")) |> 
-  rename_with(~ str_replace(.x, "_w2", "_wk2")) |> 
-  rename_with(~ str_replace(.x, "_w3", "_wk3")) |> 
-  rename_with(~ str_replace(.x, "_w4", "_wk4")) |> 
-  # move bdi_baseline to be first variable in dataset for penalty.factor
-  relocate(bdi_baseline) 
+  # rename baseline to y_base
+  rename(y_base = !!y_baseline) |> 
+  # remove other outcome & baseline variables
+  select(-contains("outcome"), -contains("baseline")) |> 
+  # remove variables not included in ANY feature sets
+  select(record_id, y_base, y,
+         starts_with("session_count_w"),
+         average_session_time_wk3,
+         starts_with("total_time_w"),
+         starts_with("schedule_activity_w"),
+         starts_with("scheduled_activities_w"),
+         completed_activities_wk1, completed_activities_wk3, 
+         completed_activities_wk4, mood_days_wk1,
+         add_goal_wk1, add_goal_chg_wk1_wk3, add_goal_chg_wk1_wk4,
+         starts_with("add_goal_chg_from_avg"),
+         badges_earned_wk1, badges_earned_wk3,
+         badges_earned_chg_wk1_wk4, badges_earned_chg_from_avg_wk4,
+         total_time_chg_wk1_wk3, total_time_chg_wk1_wk4,
+         starts_with("total_time_chg_from_avg"),
+         schedule_activity_chg_from_prev_wk3,
+         phq8_comp_chg_wk1_wk4,
+         starts_with("phq9_change")) |> 
+  # move bdi_baseline/phq_baseline to be first variable in dataset for penalty.factor
+  relocate(y_base, y, everything()) 
 
 
 ```
@@ -108,9 +117,9 @@ ml_mode <- "classification"
 hp1_glmnet <- c(0, seq(.1, 1, length.out = 10)) 
 
 # lambda (penalty)
-hp2_glmnet_min <- 4.1 # min for penalty grid - will be passed into exp(seq(min, max, length.out = out))
-hp2_glmnet_max <- 5.5 # max for penalty grid
-hp2_glmnet_out <- 15 # length of penalty grid
+hp2_glmnet_min <- -5 # min for penalty grid - will be passed into exp(seq(min, max, length.out = out))
+hp2_glmnet_max <- 5 # max for penalty grid
+hp2_glmnet_out <- 200 # length of penalty grid
 ```
 
 ## Make configurations tibble
@@ -141,7 +150,37 @@ inner_split_num <- 1:(inner_n_repeats * inner_n_folds)
 ```{r}
 configs <- expand_grid(outer_split_num = outer_split_num,
                        inner_split_num = inner_split_num,
-                       feature_set = c("thru_wk2", "thru_wk3", "thru_wk4"),
+                       # feature_set = c("eda_chg_phq_thru_wk2", 
+                       #                 "eda_raw_phq_thru_wk2", 
+                       #                 "eda_actions_phq_thru_wk2", 
+                       #                 "eda_usage_phq_thru_wk2", 
+                       #                 "eda_max_phq_thru_wk2"),
+                       feature_set = c(#"eda_chg_thru_wk2",
+                         "eda_raw_thru_wk2",
+                         "eda_actions_thru_wk2",
+                         "eda_usage_thru_wk2",
+                         "eda_max_thru_wk2",
+                         "eda_chg_phq_thru_wk3",
+                         "eda_raw_phq_thru_wk3",
+                         "eda_actions_phq_thru_wk3",
+                         "eda_usage_phq_thru_wk3",
+                         "eda_max_phq_thru_wk3",
+                         "eda_chg_phq_thru_wk4",
+                         "eda_raw_phq_thru_wk4",
+                         "eda_actions_phq_thru_wk4",
+                         "eda_usage_phq_thru_wk4",
+                         "eda_max_phq_thru_wk4",
+                         "eda_chg_thru_wk3",
+                         "eda_raw_thru_wk3",
+                         "eda_actions_thru_wk3",
+                         "eda_usage_thru_wk3",
+                         "eda_max_thru_wk3",
+                         "eda_chg_thru_wk4",
+                         "eda_raw_thru_wk4",
+                         "eda_actions_thru_wk4",
+                         "eda_usage_thru_wk4",
+                         "eda_max_thru_wk4"
+                       ),
                        hp1 = hp1_glmnet,
                        hp2 = NA_integer_) |> 
   tibble::rownames_to_column("config_num") |> 
@@ -197,18 +236,14 @@ fit_eval <- function(config_current, configs, d, splits) {
 ### Fit models across all configurations
 
 ```{r}
-if (file.exists(str_c("~/Desktop/dahne_lab/moodivate/results_",
-                      cv_resample_type, ".csv"))) {
-  results <- read_csv(str_c("~/Desktop/dahne_lab/moodivate/results_",
-                            cv_resample_type, ".csv"),
-                      show_col_types = F)
-} else {
-  results <- min(configs$config_num):max(configs$config_num) |> 
-    map(\(config_current) fit_eval(config_current, configs, 
-                                   d, splits)) |> 
-    list_rbind() %>% 
-    mutate(new_config_num = 1:nrow(.))
-}
+#tictoc::tic()
+#results <- min(configs$config_num):max(configs$config_num) |> 
+results <- configs$config_num |>  
+  map(\(config_current) fit_eval(config_current, 
+                                 configs, d, splits)) |> 
+  list_rbind() |>  
+  mutate(new_config_num = row_number())
+#tictoc::toc()
 
 ```
 
@@ -223,8 +258,8 @@ glimpse(results)
 Save results
 ```{r}
 results |> 
-  write_csv(str_c("~/Desktop/dahne_lab/moodivate/results_", 
-                  cv_resample_type, "_c.csv"))
+  write_csv(str_c("~/Desktop/musc/dahne_lab/moodivate/results_", 
+                  cv_resample_type, "_eda_phq_wk3.csv"))
 ```
 
 
