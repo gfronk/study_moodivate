@@ -99,69 +99,68 @@ build_recipe <- function(d, config) {
     # remove near-zero-variance features
     step_nzv(all_predictors())
   
-  if (config$feature_set == "thru_wk2") {
-    # remove weeks 3 & 4 data for feature set "thru_wk2"
+  if (str_detect(config$feature_set, "chg")) {
+    # remove "raw" (between-subs) features
     rec <- rec |> 
-      step_select(-ends_with("_wk3"), -ends_with("_wk4"))
+      step_rm(starts_with("session_count_w"),
+              starts_with("average_session_time_w"),
+              starts_with("total_time_w"),
+              starts_with("schedule_activity_w"),
+              starts_with("scheduled_activities_w"),
+              starts_with("completed_activities_w"),
+              starts_with("mood_days_w"),
+              starts_with("add_goal_w"),
+              starts_with("badges_earned_w"))
   }
   
-  if (config$feature_set == "thru_wk3") {
-    # remove week 4 data for feature set "thru_wk3"
+  if (str_detect(config$feature_set, "raw")) {
+    # remove "change" (within-subs) features
     rec <- rec |> 
-      step_select(-ends_with("_wk4"))
+      step_rm(contains("chg"))
   }
   
-  if (config$feature_set == "sess_count") {
+  if (str_detect(config$feature_set, "usage")) {
+    # remove activity-/component-related features
     rec <- rec |> 
-      step_select(bdi_baseline, starts_with("session_count"), y)
+      step_rm(contains("activit"),
+              contains("add_goal"),
+              contains("badges"),
+              contains("mood_days"),
+              contains("add_goal"),
+              contains("phq8_comp"))
   }
   
-  if (config$feature_set == "total_time") {
+  if (str_detect(config$feature_set, "actions")) {
+    # remove usage-related features
     rec <- rec |> 
-      step_select(bdi_baseline, starts_with("total_time"), y)
+      step_rm(contains("session_count_w"),
+              contains("total_time"),
+              contains("average_session"))
   }
   
-  if (config$feature_set == "sess_time") {
+  if (str_detect(config$feature_set, "max")) {
+    # remove marginal features (group dif p < 0.1 & > 0.05)
     rec <- rec |> 
-      step_select(bdi_baseline, starts_with("average_session_time"), y)
+      step_rm("session_count_wk3", "average_session_time_wk3",
+              "completed_activities_wk1", "mood_days_wk1",
+              starts_with("add_goal_chg"), starts_with("badges_earned_chg"),
+              "phq8_comp_chg_wk1_wk4")
   }
   
-  if (config$feature_set == "add_act") {
+  if (str_detect(config$feature_set, "thru_wk2")) {
     rec <- rec |> 
-      step_select(bdi_baseline, starts_with("add_activity"), y)
+      step_rm(ends_with("_wk3"), ends_with("_wk4"))
   }
   
-  if (config$feature_set == "sched_act") {
+  if (str_detect(config$feature_set, "thru_wk3")) {
     rec <- rec |> 
-      step_select(bdi_baseline, starts_with("scheduled_activities"), y)
+      step_rm(ends_with("_wk4"))
   }
   
-  if (config$feature_set == "complete_act") {
+  if (!str_detect(config$feature_set, "phq")) {
     rec <- rec |> 
-      step_select(bdi_baseline, starts_with("completed_activities"), y)
+      step_rm(starts_with("phq9_change"))
   }
-  
-  if (config$feature_set == "add_goal") {
-    rec <- rec |> 
-      step_select(bdi_baseline, starts_with("add_goal"), y)
-  }
-  
-  if (config$feature_set == "badges") {
-    rec <- rec |> 
-      step_select(bdi_baseline, starts_with("badges_earned"), y)
-  }
-  
-  if (config$feature_set == "mood_days") {
-    rec <- rec |> 
-      step_select(bdi_baseline, starts_with("mood_days"), y)
-  }
-  
-  if (config$feature_set == "phq8") {
-    rec <- rec |> 
-      step_select(bdi_baseline, starts_with("phq8_comp"), y)
-  }
-  
-  # no additional selection steps for feature set "thru_wk4" (all data used)
   
   return(rec)
 }
@@ -249,13 +248,14 @@ tune_model <- function(config, rec, splits, ml_mode, cv_resample_type,
     rec_in <- build_recipe(d_in, config)
     
     rec_prepped_in <- rec_in |> 
-      prep(training = d_in, strings_as_factors = FALSE)
+      prep(training = d_in)
     
     feat_in <- rec_prepped_in |> 
       bake(new_data = NULL)
     
     penalty_weights <- c(0, rep(1, ncol(feat_in) - 2))
-    # removing 2 columns - bdi_baseline (already captured with "0") and y
+    # removing 2 columns - y_base (already captured with "0") and y
+    # this ensures no weight is applied to y_base so it's always retained
     
     rm(feat_in)
     rm(rec_prepped_in)
@@ -428,22 +428,7 @@ fit_predict_eval <- function(config_num, splits, configs_best){
     select(-id_obs)
   d_out <- testing(splits$splits[[split_num]])
   
-  rec <- recipe(y ~ ., data = d_in) |> 
-    step_rm(record_id) |>
-    # standardize features, required for glmnet for weighting
-    step_normalize(all_predictors()) |> 
-    # remove near-zero-variance features
-    step_nzv(all_predictors())
-  
-  if (config_best$feature_set == "thru_wk2") {
-    rec <- rec |> 
-      step_select(-ends_with("_wk3"), -ends_with("_wk4"))
-  }
-  
-  if (config_best$feature_set == "thru_wk3") {
-    rec <- rec |> 
-      step_select(-ends_with("_wk4"))
-  }
+  rec <- build_recipe(d = d_in, config = config_best)
   
   rec_prepped <- rec |> 
     prep(training = d_in, strings_as_factors = FALSE)
@@ -452,7 +437,7 @@ fit_predict_eval <- function(config_num, splits, configs_best){
     bake(new_data = NULL)
   
   penalty_weights <- c(0, rep(1, ncol(feat_in) - 2))
-  # removing 2 columns - bdi_baseline (already captured with "0") and y
+  # removing 2 columns - y_baseline (already captured with "0") and y
   
   model_best <- fit_best_model(best_model = config_best, 
                                feat = feat_in, 
