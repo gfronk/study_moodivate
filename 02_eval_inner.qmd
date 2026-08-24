@@ -31,28 +31,46 @@ options(tibble.print_max = Inf)
 
 Read in results file ("results.csv") created in 01_fit_inner.qmd. This file contains one row per model configuration (unique combination of model tuning parameters and feature set) for each held-out fold. Each row contains the model configuration information (outer split number, inner split number, feature set, hp1 [alpha/mixture], and hp2 [lambda/penalty]). Each row also contains performance metrics for the model fit in the held-in data and evaluated in the indicated validation set (held-out fold from inner loop). 
 
+For RData objects:
 ```{r}
+load("~/Desktop/musc/dahne_lab/moodivate/results_eda_phq_full_feature_set.Rdata")
+results_1 <- results
+rm(results)
+load("~/Desktop/musc/dahne_lab/moodivate/results_nested_eda_phq_wk3.Rdata")
+
+results <- results |> 
+  bind_rows(results_1) |> 
+  arrange(outer_split_num, inner_split_num)
+```
+
+
+For .csv files:
+```{r eval = FALSE}
 cv_resample_type <- "nested"
 
-results_glmnet <- read_csv(str_c("~/Desktop/dahne_lab/moodivate/results_",
-                      cv_resample_type, "_glmnet.csv"), 
-                    show_col_types = FALSE) |> 
-  mutate(algorithm = "glmnet") |> 
-  relocate(algorithm, .before = feature_set) |> 
-  glimpse()
+results_files <- str_subset(
+  list.files("~/Desktop/musc/dahne_lab/moodivate",
+             full.names = TRUE), 
+  str_c("results_", cv_resample_type))
 
-results_glm <- read_csv(str_c("~/Desktop/dahne_lab/moodivate/results_",
-                      cv_resample_type, "_glm.csv"), 
-                    show_col_types = FALSE) |> 
-  glimpse()
+no_all <- str_which(results_files, "all", negate = TRUE)
+# remove if there is already a results_all file
+# to avoid reading in duplicates
 
-results <- bind_rows(results_glmnet, results_glm) |> 
+results_files <- results_files[no_all]
+
+results <- results_files |> 
+  map(\(file) read_csv(file, show_col_types = FALSE)) |> 
+  list_rbind() |> 
   arrange(outer_split_num, inner_split_num)
+
 glimpse(results)
 
 results |> 
-  write_csv(str_c("~/Desktop/dahne_lab/moodivate/results_",
-                      cv_resample_type, "_all.csv"))
+  write_csv(str_c("~/Desktop/musc/dahne_lab/moodivate/results_",
+                  cv_resample_type, "_all.csv"))
+
+#results_all <- results
 ```
 
 ## Process metrics
@@ -67,7 +85,6 @@ results <- results |>
 
 nrow(results)
 ```
-Some duplicates got made when I added hp2 values for glmnet algorithms.
 
 Checks that breakdowns are as expected. Should be equal numbers of each value.
 ```{r}
@@ -76,9 +93,7 @@ results |> janitor::tabyl(inner_split_num)
 results |> janitor::tabyl(hp1) 
 results |> janitor::tabyl(hp2) 
 results |> janitor::tabyl(feature_set)
-results |> janitor::tabyl(algorithm)
 ```
-hp1 values are showing up a little weird here for some reason, but they aggregate together correctly.
 
 ## Median metrics across inner folds for model configurations
 
@@ -86,8 +101,8 @@ This process groups by `outer_split_number`, `feature_set`, `hp1`, and `hp2` suc
 
 ```{r}
 metrics_avg <- results |> 
-  group_by(outer_split_num, algorithm, feature_set, hp1, hp2) |> 
-  summarize(across(c(accuracy, roc_auc,
+  group_by(outer_split_num, feature_set, hp1, hp2) |> 
+  summarize(across(c(roc_auc, accuracy,
                      sens, spec, ppv, npv),
                    median),
             n_jobs = n(), .groups = "drop") |> 
@@ -100,79 +115,67 @@ metrics_avg <- results |>
 ```{r}
 unique(metrics_avg$n_jobs)
 ```
-
 The `n_jobs` variable should always be 10 jobs (10 inner held-out folds per combination of outer split number, feature set, and tuning parameters). 
 
-**Performance: Through Week 2 Models**
-
+Create grouping variables
 ```{r}
-metrics_avg |> 
-  filter(feature_set == "thru_wk2") |> 
-  slice(1:50) |> 
-  select(feature_set, algorithm, hp1, hp2, roc_auc) |> 
-  print()
-
-metrics_avg |> 
-  filter(feature_set == "thru_wk2") |> 
-  pull(roc_auc) |> 
-  hist()
+metrics_avg <- metrics_avg |> 
+  mutate(week = str_sub(feature_set, start = -3L),
+         phq = if_else(str_detect(feature_set, "phq"), "phq", "eda_only"),
+         feat_type = str_sub(feature_set, start = 5L, end = -10L))
+  
 ```
 
-**Performance: Through Week 3 Models**
+**Performance: Overall**
 
 ```{r}
 metrics_avg |> 
-  filter(feature_set == "thru_wk3") |> 
-  select(feature_set, algorithm, hp1, hp2, roc_auc) |> 
-  slice(1:50) |> 
-  print()
+  select(feature_set, hp1, hp2, roc_auc) |> 
+  slice(1:50) 
+
+# metrics_avg |> 
+#   mutate(feat_cat = if_else(str_detect(feature_set, "phq"),
+#                             "eda_and_phq",
+#                             "eda_only")) |> 
+#   ggplot(aes(x = roc_auc, fill = feat_cat)) +
+#   geom_histogram(position = "dodge")
 
 metrics_avg |> 
-  filter(feature_set == "thru_wk3") |> 
-  pull(roc_auc) |> 
-  hist()
-```
-
-**Performance: Through Week 4 Models**
-
-```{r}
-metrics_avg |> 
-  filter(feature_set == "thru_wk4") |> 
-  select(feature_set, algorithm, hp1, hp2, roc_auc) |> 
-  slice(1:50) |> 
-  print()
-
-metrics_avg |> 
-  filter(feature_set == "thru_wk4") |> 
-  pull(roc_auc) |> 
-  hist()
-```
-
-**Performance: Single-Feature Group Models**
-```{r}
-metrics_avg |> 
-  filter(!str_detect(feature_set, "thru_")) |> 
-  select(feature_set, algorithm, roc_auc) |> 
-  slice(1:50) |> 
-  print()
-```
-
-**Performance: By Algorithm**
-```{r}
-metrics_avg |> 
-  group_by(algorithm) |> 
   summarize(median_auc = median(roc_auc),
             min_auc = min(roc_auc),
             max_auc = max(roc_auc))
 ```
 
-**Performance: Across Feature Sets**
-
-Median performance across ALL configurations
+**Performance Across Individual Feature Sets**
 ```{r}
-
-
 metrics_avg |> 
+  group_by(feature_set) |> 
+  summarize(median_auc = median(roc_auc)) |> 
+  arrange(desc(median_auc))
+```
+
+**Performance Across Weeks**
+```{r}
+metrics_avg |> 
+  group_by(week) |> 
+  summarize(median_auc = median(roc_auc),
+            min_auc = min(roc_auc),
+            max_auc = max(roc_auc))
+```
+
+**Performance Across PHQ Inclusion**
+```{r}
+metrics_avg |> 
+  group_by(phq) |> 
+  summarize(median_auc = median(roc_auc),
+            min_auc = min(roc_auc),
+            max_auc = max(roc_auc))
+```
+
+**Performance Across Feature Set Type**
+```{r}
+metrics_avg |> 
+  group_by(feat_type) |> 
   summarize(median_auc = median(roc_auc),
             min_auc = min(roc_auc),
             max_auc = max(roc_auc))
@@ -182,37 +185,56 @@ Performance of best configurations
 ```{r}
 set.seed(11397)
 configs_best <- metrics_avg |> 
-  # negate hp1 so that we can prefer the max (hp1 closest to 0)
-  mutate(inv_hp1 = hp1 * -1) |> 
+  # mutate(feat_cat = if_else(str_detect(feature_set, "phq"),
+  #                           "eda_and_phq",
+  #                           "eda_only")) |> 
   group_by(outer_split_num) |> 
-  # select config w max roc_auc with lowest hp1 (highest inv_hp1)
+  # select config w max roc_auc with highest hp1 (closest to lasso)
   # keep remaining ties (i.e., same roc_auc and same hp1)
-  slice_max(order_by = tibble(roc_auc, inv_hp1), with_ties = TRUE) |> 
+  slice_max(order_by = tibble(roc_auc, hp1), with_ties = TRUE) |> 
   ungroup() |> 
   group_by(outer_split_num) |> 
   # among remaining ties, randomly select single config 
   slice_sample(n = 1) |> 
-  select(-inv_hp1) |> 
   ungroup()
 
 configs_best |> 
-  select(outer_split_num, algorithm, feature_set, hp1, hp2, roc_auc) |> 
+  select(outer_split_num, feature_set, hp1, hp2, roc_auc) |> 
+  arrange(feature_set) |> 
   print(n = Inf)
-
-configs_best |> 
-  ggplot(aes(x = roc_auc)) +
-  geom_histogram() 
-
-configs_best |> 
-  pull(roc_auc) |> 
-  median()
 ```
 
-Save average metrics file (all feature sets)
+Best configurations "grouped" (to see performance "crossing" of week by PHQ/no)
+```{r}
+set.seed(11397)
+configs_best_grp <- metrics_avg |> 
+  group_by(outer_split_num, week, phq) |> 
+  # select config w max roc_auc with highest hp1 (closest to lasso)
+  # keep remaining ties (i.e., same roc_auc and same hp1)
+  slice_max(order_by = tibble(roc_auc, hp1), with_ties = TRUE) |> 
+  ungroup() |> 
+  group_by(outer_split_num, week, phq) |> 
+  # among remaining ties, randomly select single config 
+  slice_sample(n = 1) |> 
+  ungroup()
+
+configs_best_grp |> 
+  select(outer_split_num, week, phq, feature_set, roc_auc) |> 
+  arrange(week, phq) |> 
+  print(n = Inf)
+
+configs_best_grp |> 
+  group_by(week, phq) |> 
+  summarize(median_auc = median(roc_auc),
+            min_auc = min(roc_auc),
+            max_auc = max(roc_auc))
+```
+
+Save average metrics file
 ```{r}
 metrics_avg |> 
   arrange(outer_split_num, feature_set, hp1, hp2) |> 
-  readr::write_csv("~/Desktop/dahne_lab/moodivate/metrics_inner_avg.csv")
+  readr::write_csv("~/Desktop/musc/dahne_lab/moodivate/metrics_inner_avg.csv")
 ```
 
 ## Plot tuning parameters
@@ -223,7 +245,6 @@ With real data, we will confirm that the plot captures a peak (i.e., local maxim
 
 ```{r}
 metrics_plot <- results |> 
-  filter(algorithm == "glmnet") |> 
   # don't group by outer_split_num, otherwise too many data points
   group_by(feature_set, hp1, hp2) |> 
   summarize(across(c(accuracy, roc_auc,
@@ -232,13 +253,7 @@ metrics_plot <- results |>
             n_jobs = n(), .groups = "drop") |> 
   relocate(n_jobs) |> 
   arrange(desc(roc_auc)) |> 
-  ungroup() |> 
-  mutate(feature_set = case_when(
-    feature_set == "thru_wk2" ~ "Weeks 1 & 2",
-    feature_set == "thru_wk3" ~ "Weeks 1 - 3",
-    feature_set == "thru_wk4" ~ "Weeks 1 - 4",
-    TRUE ~ NA_character_
-  ))
+  ungroup() 
 
 feature_sets <- unique(metrics_plot$feature_set) 
 
