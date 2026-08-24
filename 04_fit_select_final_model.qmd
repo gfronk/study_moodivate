@@ -11,6 +11,7 @@ Load libraries
 library(glmnet)
 library(tidyverse)
 library(tidymodels)
+library(probably)
 ```
 
 Source functions file
@@ -21,10 +22,8 @@ This functions file (fun_moodivate.R) contains many functions that are used thro
 
 ## Read in data
 
-To ensure all proposed analyses are feasible and to specify analysis steps as precisely as possible, **we continue to conduct our proposed analyses using a shuffled (i.e., randomized) version of our dataset**. Following testing, our analyses will follow these scripts exactly using our real data.
-
 ```{r}
-d <- read_csv("~/Desktop/internship/moodivate/toy_data.csv", 
+d <- read_csv("~/Desktop/musc/dahne_lab/moodivate/data_clean.csv", 
               show_col_types = FALSE) |> 
   glimpse()
 ```
@@ -36,9 +35,10 @@ We prepare our data in the same way as all previous scripts.
 ### Set up outcome variable levels
 
 ```{r}
-y_col_name <- "bdi_outcome"
+y_col_name <- "phq9_outcome_cat"
 y_level_pos <- "non_responder"
 y_level_neg <- "responder"
+y_baseline <- "phq9_baseline"
 ```
 
 ### Class variables & set factor levels
@@ -48,28 +48,44 @@ d <- d |>
   # rename outcome to y
   rename(y = !!y_col_name) |> 
   mutate(y = case_when(
-    y == 0 ~ "non_responder",
-    y == 1 ~ "responder",
+    y == "NonResponder" ~ "non_responder",
+    y == "Responder" ~ "responder",
     TRUE ~ NA_character_)) %>% 
   # y as a factor with two levels, positive level first
   mutate(y = factor(y, levels = c(!!y_level_pos,
                                   !!y_level_neg))) |> 
-  # standardize naming
-  rename_with(~ str_replace(.x, "_w1", "_wk1")) |> 
-  rename_with(~ str_replace(.x, "_w2", "_wk2")) |> 
-  rename_with(~ str_replace(.x, "_w3", "_wk3")) |> 
-  rename_with(~ str_replace(.x, "_w4", "_wk4")) |> 
-  # move bdi_baseline to be first variable in dataset for penalty.factor
-  relocate(bdi_baseline) 
-
-
+  # rename baseline to y_base
+  rename(y_base = !!y_baseline) |> 
+  # remove other outcome & baseline variables
+  select(-contains("outcome"), -contains("baseline")) |> 
+  # remove variables not included in ANY feature sets
+  select(record_id, y_base, y,
+         starts_with("session_count_w"),
+         average_session_time_wk3,
+         starts_with("total_time_w"),
+         starts_with("schedule_activity_w"),
+         starts_with("scheduled_activities_w"),
+         completed_activities_wk1, completed_activities_wk3, 
+         completed_activities_wk4, mood_days_wk1,
+         add_goal_wk1, add_goal_chg_wk1_wk3, add_goal_chg_wk1_wk4,
+         starts_with("add_goal_chg_from_avg"),
+         badges_earned_wk1, badges_earned_wk3,
+         badges_earned_chg_wk1_wk4, badges_earned_chg_from_avg_wk4,
+         total_time_chg_wk1_wk3, total_time_chg_wk1_wk4,
+         starts_with("total_time_chg_from_avg"),
+         schedule_activity_chg_from_prev_wk3,
+         phq8_comp_chg_wk1_wk4,
+         starts_with("phq9_change")) |> 
+  # move bdi_baseline/phq_baseline to be first variable in dataset
+  #for penalty.factor
+  relocate(y_base, y, everything()) 
 ```
 
 ## Divide data
 
 ### Set cross-validation parameters
 
-Following nested cross-validation conducted in scripts 01-03, the final step is to fit and select models using the *inner loop CV* but in our *entire dataset*. Consequently, we use one repeat of 10-fold CV. Performance metrics from this round of CV will **not** be used for model evaluation; they will only be used for selecting a final model configuration. 
+Following nested cross-validation conducted in scripts 01-03, the final step is to fit and select models using the *inner loop CV* but in our *entire dataset*. Consequently, we use one repeat of 10-fold CV (using a new seed). Performance metrics from this round of CV will **not** be used for model evaluation; they will only be used for selecting a final model configuration. 
 
 ```{r}
 cv_resample_type <- "kfold"
@@ -99,9 +115,9 @@ ml_mode <- "classification"
 hp1_glmnet <- c(0, seq(.1, 1, length.out = 10)) 
 
 # lambda (penalty)
-hp2_glmnet_min <- -8 # min for penalty grid - will be passed into exp(seq(min, max, length.out = out))
-hp2_glmnet_max <- 2 # max for penalty grid
-hp2_glmnet_out <- 100 # length of penalty grid
+hp2_glmnet_min <- -5 # min for penalty grid - will be passed into exp(seq(min, max, length.out = out))
+hp2_glmnet_max <- 5 # max for penalty grid
+hp2_glmnet_out <- 200 # length of penalty grid
 ```
 
 ## Make configurations tibble
@@ -123,7 +139,43 @@ split_num <- 1:(n_repeats * n_folds)
 
 ```{r}
 configs <- expand_grid(split_num = split_num,
-                       feature_set = c("thru_wk2", "thru_wk3", "thru_wk4"),
+                       feature_set = c(#"eda_chg_thru_wk2",
+                         # eng only, through wk2
+                         "eda_raw_thru_wk2",
+                         "eda_actions_thru_wk2",
+                         "eda_usage_thru_wk2",
+                         "eda_max_thru_wk2",
+                         # eng + clin, through wk2
+                         "eda_chg_phq_thru_wk2",
+                         "eda_raw_phq_thru_wk2",
+                         "eda_actions_phq_thru_wk2",
+                         "eda_usage_phq_thru_wk2",
+                         "eda_max_phq_thru_wk2",
+                         # eng + clin, through wk3
+                         "eda_chg_phq_thru_wk3",
+                         "eda_raw_phq_thru_wk3",
+                         "eda_actions_phq_thru_wk3",
+                         "eda_usage_phq_thru_wk3",
+                         "eda_max_phq_thru_wk3",
+                         # eng + clin, through wk4
+                         "eda_chg_phq_thru_wk4",
+                         "eda_raw_phq_thru_wk4",
+                         "eda_actions_phq_thru_wk4",
+                         "eda_usage_phq_thru_wk4",
+                         "eda_max_phq_thru_wk4",
+                         # eng only, through wk3
+                         "eda_chg_thru_wk3",
+                         "eda_raw_thru_wk3",
+                         "eda_actions_thru_wk3",
+                         "eda_usage_thru_wk3",
+                         "eda_max_thru_wk3",
+                         # eng only, through wk4
+                         "eda_chg_thru_wk4",
+                         "eda_raw_thru_wk4",
+                         "eda_actions_thru_wk4",
+                         "eda_usage_thru_wk4",
+                         "eda_max_thru_wk4"
+                       ),
                        hp1 = hp1_glmnet,
                        hp2 = NA_integer_) |> 
   tibble::rownames_to_column("config_num") |> 
@@ -132,7 +184,7 @@ configs <- expand_grid(split_num = split_num,
 glimpse(configs)
 ```
 
-Feature sets are specific combinations of features. Here, we are fitting models separately that use data from weeks 1 & 2, weeks 1 through 3, and weeks 1 through 4 so that we can examine the trade-off between model performance and duration of data collection required before making a decision. 
+Feature sets are specific combinations of features (data type X weeks included X specific sets of engagement features). 
 
 Note that hp2 (lambda/penalty) is listed as NA because each configuration will `tune()` across the 100 values set using `hp2_glmnet_min`, `hp2_glmnet_max`, and `hp2_glmnet_out` (length). 
 
@@ -160,13 +212,6 @@ fit_eval <- function(config_current, configs, d, splits) {
   # build recipe
   rec <- build_recipe(d = d, config = config)
   
-  # create penalty_weights vector using feature set dimensions
-  feat <- rec |> 
-    prep(training = d, strings_as_factors = FALSE) |> 
-    bake(new_data = NULL) 
-  penalty_weights <- c(0, rep(1, ncol(feat) - 2))
-  rm(feat) 
-  
   # fit model & get predictions and model metrics
   results <- tune_model(config = config,
                         rec = rec, 
@@ -176,8 +221,7 @@ fit_eval <- function(config_current, configs, d, splits) {
                         hp2_glmnet_min = hp2_glmnet_min, 
                         hp2_glmnet_max = hp2_glmnet_max, 
                         hp2_glmnet_out = hp2_glmnet_out,
-                        y_level_pos = y_level_pos,
-                        penalty_weights = penalty_weights)
+                        y_level_pos = y_level_pos)
   
   return(results)
 }
@@ -187,18 +231,20 @@ fit_eval <- function(config_current, configs, d, splits) {
 ### Fit models across all configurations
 
 ```{r}
-if (file.exists(str_c("~/Desktop/internship/moodivate/results_",
+tictoc::tic()
+if (file.exists(str_c("~/Desktop/musc/dahne_lab/moodivate/results_",
                       cv_resample_type, ".csv"))) {
-  results <- read_csv(str_c("~/Desktop/internship/moodivate/results_",
-                      cv_resample_type, ".csv"),
+  results <- read_csv(str_c("~/Desktop/musc/dahne_lab/moodivate/results_",
+                            cv_resample_type, ".csv"),
                       show_col_types = F)
 } else {
-results <- 1:max(configs$config_num) |> 
-  map(\(config_current) fit_eval(config_current, configs, 
-                                 d, splits)) |> 
-  list_rbind() %>% 
-  mutate(new_config_num = 1:nrow(.))
+  results <- 1:max(configs$config_num) |> 
+    map(\(config_current) fit_eval(config_current, configs, 
+                                   d, splits)) |> 
+    list_rbind() %>% 
+    mutate(new_config_num = 1:nrow(.))
 }
+tictoc::toc()
 
 ```
 
@@ -213,13 +259,14 @@ glimpse(results)
 Save results
 ```{r}
 results |> 
-  write_csv(str_c("~/Desktop/internship/moodivate/results_",
-                  cv_resample_type, ".csv"))
+  write_csv(str_c(
+    "~/Desktop/musc/dahne_lab/moodivate/results_",
+    cv_resample_type, ".csv"))
 ```
 
 ## Select final model configurations
 
-We now use average performance across the 10 held-out folds to select the best model configuration. As a reminder, performance metrics are being used *only* for selection and *not* for model evaluation. Evaluation was completed in the outer loop of nested cross-validation.
+We now use average performance across the 10 held-out folds to select the best model configuration **per model context**. As a reminder, performance metrics are being used *only* for selection and *not* for model evaluation. Evaluation was completed in the outer loop of nested cross-validation.
 
 ```{r}
 metrics_avg <- results |> 
@@ -235,69 +282,99 @@ metrics_avg <- results |>
 glimpse(metrics_avg)
 ```
 
-Select best model configuration for each feature set (through week 2 / through week 3 / through week 4).
+Select best model configurations
 
 ```{r}
-best_config_thru_wk2 <- metrics_avg |> 
-  filter(feature_set == "thru_wk2") |> 
-  slice(1) |> 
+set.seed(51189)
+
+best_config_eda2 <- metrics_avg |> 
+  filter(!str_detect(feature_set, "phq") & str_detect(feature_set, "wk2")) |> 
+  slice_max(roc_auc, with_ties = TRUE) |> 
+  # among remaining ties, randomly select single config 
+  slice_sample(n = 1) |> 
+  ungroup() |> 
   print()
 
-best_config_thru_wk3 <- metrics_avg |> 
-  filter(feature_set == "thru_wk3") |> 
-  slice(1) |> 
+best_config_eda3 <- metrics_avg |> 
+  filter(!str_detect(feature_set, "phq") & str_detect(feature_set, "wk3")) |> 
+  slice_max(roc_auc, with_ties = TRUE) |> 
+  # among remaining ties, randomly select single config 
+  slice_sample(n = 1) |> 
+  ungroup() |> 
   print()
 
-best_config_thru_wk4 <- metrics_avg |> 
-  filter(feature_set == "thru_wk4") |> 
-  slice(1) |> 
+best_config_eda4 <- metrics_avg |> 
+  filter(!str_detect(feature_set, "phq") & str_detect(feature_set, "wk4") & !str_detect(feature_set, "max")) |>
+  slice_max(roc_auc, with_ties = TRUE) |> 
+  # among remaining ties, randomly select single config 
+  slice_sample(n = 1) |> 
+  ungroup() |> 
+  print()
+
+best_config_phq2 <- metrics_avg |> 
+  filter(str_detect(feature_set, "phq") & str_detect(feature_set, "wk2")) |> 
+  slice_max(roc_auc, with_ties = TRUE) |> 
+  # among remaining ties, randomly select single config 
+  slice_sample(n = 1) |> 
+  ungroup() |> 
+  print()
+
+best_config_phq3 <- metrics_avg |> 
+  filter(str_detect(feature_set, "phq") & str_detect(feature_set, "wk3")) |> 
+  slice_max(roc_auc, with_ties = TRUE) |> 
+  # among remaining ties, randomly select single config 
+  slice_sample(n = 1) |> 
+  ungroup() |> 
+  print()
+
+best_config_phq4 <- metrics_avg |> 
+  filter(str_detect(feature_set, "phq") & str_detect(feature_set, "wk4")) |> 
+  slice_max(roc_auc, with_ties = TRUE) |> 
+  # among remaining ties, randomly select single config 
+  slice_sample(n = 1) |> 
+  ungroup() |> 
   print()
 ```
 
-Save out best configurations for each feature set
+Save out best configurations
 
 ```{r}
-best_config_thru_wk2 |> 
-  write_csv(str_c("~/Desktop/internship/moodivate/best_config_thru_wk2.csv"))
+best_configs <- best_config_eda2 |> 
+  bind_rows(best_config_eda3) |> 
+  bind_rows(best_config_eda4) |> 
+  bind_rows(best_config_phq2) |> 
+  bind_rows(best_config_phq3) |> 
+  bind_rows(best_config_phq4) |> 
+  write_csv(str_c(
+    "~/Desktop/musc/dahne_lab/moodivate/best_configs.csv"))
 
-best_config_thru_wk3 |> 
-  write_csv(str_c("~/Desktop/internship/moodivate/best_config_thru_wk3.csv"))
-
-best_config_thru_wk4 |> 
-  write_csv(str_c("~/Desktop/internship/moodivate/best_config_thru_wk4.csv"))
 ```
 
-## Fit final model
+## Fit final models
 
-Ultimately, we will fit only one final model after having decided which feature set to favor (based on a performance vs. time-to-collect-data trade-off). This will be decided based on performance in the outer loop of nested cross-validation, *not* based on performance here in the final fitting stages.
+Ultimately, we will fit only one final model per model context using the best configuration *selected* above. This will be the model that gets deployed going forward in new studies. Researchers will need to decide which context (combination of data type[s] and weeks included) gives them the best trade-off of performance, burden of data collection, and time before treatment re-assignment.
 
-Set best model configuration (selected feature set)
-
-```{r}
-best_config <- best_config_thru_wk4
-```
-
-Fit final model
+### Fit final model: Engagement only, through Week 2
 
 ```{r}
-rec <- build_recipe(d = d, config = best_config)
+rec <- build_recipe(d = d, config = best_config_eda2)
 
 rec_prepped_full <- rec |> 
-  prep(training = d, strings_as_factors = FALSE)
+  prep(training = d)
 
 feat_all <- rec_prepped_full |> 
   bake(new_data = NULL)
 
 penalty_weights <- c(0, rep(1, ncol(feat_all) - 2))
 
-model_best_full <- fit_best_model(best_model = best_config, 
-                                  feat = feat_all, 
-                                  ml_mode = ml_mode,
-                                  algorithm = algorithm,
-                                  penalty_weights = penalty_weights)
+model_best_full_eda2 <- fit_best_model(best_model = best_config_eda2, 
+                                       feat = feat_all, 
+                                       ml_mode = ml_mode,
+                                       algorithm = algorithm,
+                                       penalty_weights = penalty_weights)
 ```
 
-### Model coefficients
+#### Model coefficients
 
 **NOTE**: Coefficients are naturally inverted (i.e., positive class ["non-responder"] treated as first [vs. second] class). Here, we multiply coefficients by -1 to align the direction of coefficients with the rest of our analyses. Once flipped (i.e., as they appear below)...
 
@@ -306,62 +383,996 @@ A *positive coefficient* indicates that increases in the feature *increase* the 
 A *negative coefficient* indicates that increases in the feature *decrease* the likelihood of being a non-responder (i.e., increase the likelihood of responding).
 
 ```{r}
-model_tidy <- tidy(model_best_full)
+model_tidy_eda2 <- tidy(model_best_full_eda2)
 
-model_tidy |> 
-  write_csv("~/Desktop/internship/moodivate/model_best_tidy.csv")
-  
+model_tidy_eda2 |> 
+  write_csv("~/Desktop/musc/dahne_lab/moodivate/model_best_eda2_tidy.csv")
+
 ```
 
 Table of all "retained" features (i.e., features whose parameter estimates were non-zero; parameter estimates of 0 indicate removal from the model via LASSO selection). 
 
 ```{r}
-retained_vars <- model_tidy |> 
+retained_vars_eda2 <- model_tidy_eda2 |> 
   mutate(estimate = estimate * -1) |> 
   filter(abs(estimate) > 0) |> 
   select(-penalty) |> 
   arrange(desc(abs(estimate)))
 
-knitr::kable(retained_vars, digits = 4)
+knitr::kable(retained_vars_eda2, digits = 6)
 ```
 
-We can also look at groupings of retained features by...
+So, we see that:
 
-**Feature type**
+People who spend more time in the app in Weeks 1 & 2 (`total_time_wk*` features) are *less* likely to be non-responders (i.e., are more likely to respond). 
 
-Of note, `bdi_baseline` and `(Intercept)` can only have one feature as they do not repeat across weeks.
+People who have more discrete app sessions in Weeks 1 & 2 (`session_count_wk*` features) are *less* likely to be non-responders (i.e., are more likely to respond).
+
+People who have higher baseline PHQ scores (`y_base` feature) are *less* likely to be non-responders (i.e., are more likely to respond). These people have a higher ceiling from which to drop down.
+
+**Key Takeaways**: Engaging more, defined as overall time spent in the app and number of discrete sessions, makes you more likely to respond to treatment. More severe depression at baseline increases the likelihood of responding to treatment. 
+
+Get normalization parameters
+```{r}
+norm_params_eda2 <- tidy(rec_prepped_full, number = 2) # step 2 is normalization
+
+# filter down to retained variables
+norm_params_retained_eda2 <- norm_params_eda2 |> 
+  filter(terms %in% retained_vars_eda2$term)
+
+# pivot wider
+norm_params_retained_eda2 <- norm_params_retained_eda2 |> 
+  select(terms, statistic, value) |> 
+  pivot_wider(names_from = statistic, values_from = value)
+
+knitr::kable(norm_params_retained_eda2, digits = 6)
+
+# will then need to do:
+# ((feature value - mean) / sd ) * parameter estimate
+```
+
+
+### Fit final model: Engagement only, through Week 3
 
 ```{r}
-ret_vars_group <- retained_vars |> 
-  separate(term, into = c("feature_type", "feature_week"), 
-           sep = "_(?=wk\\d+)", remove = FALSE,
-           fill = "right")
+rec <- build_recipe(d = d, config = best_config_eda3)
 
-ret_vars_group |> 
-  select(feature_type, estimate) |> 
-  mutate(feature_type = factor(feature_type)) |> 
-  mutate(feature_type = fct_infreq(feature_type)) |> 
-  ggplot(aes(x = feature_type, fill = feature_type)) +
-  geom_bar() +
-  coord_flip() +
-  theme(legend.position = "none")
+rec_prepped_full <- rec |> 
+  prep(training = d)
+
+feat_all <- rec_prepped_full |> 
+  bake(new_data = NULL)
+
+penalty_weights <- c(0, rep(1, ncol(feat_all) - 2))
+
+model_best_full_eda3 <- fit_best_model(best_model = best_config_eda3, 
+                                       feat = feat_all, 
+                                       ml_mode = ml_mode,
+                                       algorithm = algorithm,
+                                       penalty_weights = penalty_weights)
+```
+
+#### Model coefficients
+
+**NOTE**: Coefficients are naturally inverted (i.e., positive class ["non-responder"] treated as first [vs. second] class). Here, we multiply coefficients by -1 to align the direction of coefficients with the rest of our analyses. Once flipped (i.e., as they appear below)...
+
+A *positive coefficient* indicates that increases in the feature *increase* the likelihood of being a non-responder. 
+
+A *negative coefficient* indicates that increases in the feature *decrease* the likelihood of being a non-responder (i.e., increase the likelihood of responding).
+
+```{r}
+model_tidy_eda3 <- tidy(model_best_full_eda3)
+
+model_tidy_eda3 |> 
+  write_csv("~/Desktop/musc/dahne_lab/moodivate/model_best_eda3_tidy.csv")
 
 ```
 
-**Feature week**
+Table of all "retained" features (i.e., features whose parameter estimates were non-zero; parameter estimates of 0 indicate removal from the model via LASSO selection). 
 
 ```{r}
-ret_vars_group |> 
-  select(feature_week, estimate) |> 
-  filter(!is.na(feature_week)) |> 
-  mutate(feature_week = factor(feature_week,
-                               levels = c("wk1", "wk2", "wk3", "wk4"),
-                               labels = c("Week 1", "Week 2",
-                                          "Week 3", "Week 4"))) |> 
-  ggplot(aes(x = feature_week, fill = feature_week)) +
-  geom_bar() +
-  coord_flip() +
-  theme(legend.position = "none")
+retained_vars_eda3 <- model_tidy_eda3 |> 
+  mutate(estimate = estimate * -1) |> 
+  filter(abs(estimate) > 0) |> 
+  select(-penalty) |> 
+  arrange(desc(abs(estimate)))
+
+knitr::kable(retained_vars_eda3, digits = 6)
+```
+
+So, we see that:
+change goes up = w3 > w1 = more in the later week = # of [feature] is increasing
+positive estimate = as change goes up, likelihood of non-response goes up = as #/use of [feature] increases, less likely to respond
+
+People whose number of goals added increases over time (i.e., number of goals added in Week 3 is higher than number of goals added in Week 1) are *more* likely to be non-responders (i.e., are less likely to respond). 
+
+People whose time spent in the app increases over time (i.e., time spent in the app in Week 3 is higher than time spent in the app in Week 1 or across the average of Weeks 1 & 2) are *more* likely to be non-responders (i.e., are less likely to respond).
+
+People who have higher baseline PHQ scores (`y_base` feature) are *less* likely to be non-responders (i.e., are more likely to respond). These people have a higher ceiling from which to drop down.
+
+**Key Takeaways**: Individuals whose engagement (based on number of goals added and time spent in-app) increases are *less* likely to respond; however, when looking at raw values, the Week 1 values are *higher* among responders, but the Week 3 values are *the same* across responders and non-responders. This suggests that, like baseline PHQ-9 scores, responders have a higher ceiling from which to drop down, and an increase in values in later weeks indicates extremely low use in Weeks 1/2. More severe depression at baseline increases the likelihood of responding to treatment. 
+
+Get normalization parameters
+```{r}
+norm_params_eda3 <- tidy(rec_prepped_full, number = 2) # step 2 is normalization
+
+# filter down to retained variables
+norm_params_retained_eda3 <- norm_params_eda3 |> 
+  filter(terms %in% retained_vars_eda3$term)
+
+# pivot wider
+norm_params_retained_eda3 <- norm_params_retained_eda3 |> 
+  select(terms, statistic, value) |> 
+  pivot_wider(names_from = statistic, values_from = value)
+
+knitr::kable(norm_params_retained_eda3, digits = 6)
+
+# will then need to do:
+# ((feature value - mean) / sd ) * parameter estimate
+```
+
+
+### Fit final model: Engagement only, through Week 4
+
+```{r}
+rec <- build_recipe(d = d, config = best_config_eda4)
+
+rec_prepped_full <- rec |> 
+  prep(training = d)
+
+feat_all <- rec_prepped_full |> 
+  bake(new_data = NULL)
+
+penalty_weights <- c(0, rep(1, ncol(feat_all) - 2))
+
+model_best_full_eda4 <- fit_best_model(best_model = best_config_eda4, 
+                                       feat = feat_all, 
+                                       ml_mode = ml_mode,
+                                       algorithm = algorithm,
+                                       penalty_weights = penalty_weights)
+```
+
+#### Model coefficients
+
+**NOTE**: Coefficients are naturally inverted (i.e., positive class ["non-responder"] treated as first [vs. second] class). Here, we multiply coefficients by -1 to align the direction of coefficients with the rest of our analyses. Once flipped (i.e., as they appear below)...
+
+A *positive coefficient* indicates that increases in the feature *increase* the likelihood of being a non-responder. 
+
+A *negative coefficient* indicates that increases in the feature *decrease* the likelihood of being a non-responder (i.e., increase the likelihood of responding).
+
+```{r}
+model_tidy_eda4 <- tidy(model_best_full_eda4)
+
+model_tidy_eda4 |> 
+  write_csv("~/Desktop/musc/dahne_lab/moodivate/model_best_eda4_tidy.csv")
+
+```
+
+Table of all "retained" features (i.e., features whose parameter estimates were non-zero; parameter estimates of 0 indicate removal from the model via LASSO selection). 
+
+```{r}
+retained_vars_eda4 <- model_tidy_eda4 |> 
+  mutate(estimate = estimate * -1) |> 
+  filter(abs(estimate) > 0) |> 
+  select(-penalty) |> 
+  arrange(desc(abs(estimate)))
+
+knitr::kable(retained_vars_eda4, digits = 6)
+```
+
+So, we see that:
+
+People who spend more time in the app in week 2 (`total_time_wk2`) are *less* likely to be non-responders (i.e., are more likely to respond).
+
+People whose time spent in the app increases over time (i.e., time spent in the app in Week 3 is higher than the average of time spent in-app across Weeks 1 & 2) are *more* likely to be non-responders (i.e., are less likely to respond). Given raw values of these variables across responder and non-responder groups (people who respond used the app more in earlier weeks), responders have a higher ceiling from which to drop down.
+
+People who have higher baseline PHQ scores (`y_base` feature) are *less* likely to be non-responders (i.e., are more likely to respond). These people have a higher ceiling from which to drop down.
+
+**Key Takeaways**: People who spend more time in the app early (Week 2) and whose time in-app does not increase in Week 3 are more likely to experience benefit. More severe depression at baseline increases the likelihood of responding to treatment. 
+
+Get normalization parameters
+```{r}
+norm_params_eda4 <- tidy(rec_prepped_full, number = 2) # step 2 is normalization
+
+# filter down to retained variables
+norm_params_retained_eda4 <- norm_params_eda4 |> 
+  filter(terms %in% retained_vars_eda4$term)
+
+# pivot wider
+norm_params_retained_eda4 <- norm_params_retained_eda4 |> 
+  select(terms, statistic, value) |> 
+  pivot_wider(names_from = statistic, values_from = value)
+
+knitr::kable(norm_params_retained_eda4, digits = 6)
+
+# will then need to do:
+# ((feature value - mean) / sd ) * parameter estimate
+```
+
+### Fit final model: Engagement + clinical, through Week 2
+
+```{r}
+rec <- build_recipe(d = d, config = best_config_phq2)
+
+rec_prepped_full <- rec |> 
+  prep(training = d)
+
+feat_all <- rec_prepped_full |> 
+  bake(new_data = NULL)
+
+penalty_weights <- c(0, rep(1, ncol(feat_all) - 2))
+
+model_best_full_phq2 <- fit_best_model(best_model = best_config_phq2, 
+                                       feat = feat_all, 
+                                       ml_mode = ml_mode,
+                                       algorithm = algorithm,
+                                       penalty_weights = penalty_weights)
+```
+
+#### Model coefficients
+
+**NOTE**: Coefficients are naturally inverted (i.e., positive class ["non-responder"] treated as first [vs. second] class). Here, we multiply coefficients by -1 to align the direction of coefficients with the rest of our analyses. Once flipped (i.e., as they appear below)...
+
+A *positive coefficient* indicates that increases in the feature *increase* the likelihood of being a non-responder. 
+
+A *negative coefficient* indicates that increases in the feature *decrease* the likelihood of being a non-responder (i.e., increase the likelihood of responding).
+
+```{r}
+model_tidy_phq2 <- tidy(model_best_full_phq2)
+
+model_tidy_phq2 |> 
+  write_csv("~/Desktop/musc/dahne_lab/moodivate/model_best_phq2_tidy.csv")
+
+```
+
+Table of all "retained" features (i.e., features whose parameter estimates were non-zero; parameter estimates of 0 indicate removal from the model via LASSO selection). 
+
+```{r}
+retained_vars_phq2 <- model_tidy_phq2 |> 
+  mutate(estimate = estimate * -1) |> 
+  filter(abs(estimate) > 0) |> 
+  select(-penalty) |> 
+  arrange(desc(abs(estimate)))
+
+knitr::kable(retained_vars_phq2, digits = 6)
+```
+
+So, we see that:
+
+People who spend more time in the app in Week 2 (`total_time_wk2` feature) are *less* likely to be non-responders (i.e., are more likely to respond). 
+
+People who earn more badges in Week 1 (`badges_earned_wk1` feature) are *less* likely to be non-responders (i.e., are more likely to respond).
+
+People who add more goals in Week 1 (`add_goal_wk1` feature) are *less* likely to be non-responders (i.e., are more likely to respond).
+
+People who use the activity scheduling function more in Weeks 1 and 2 (`schedule_activity_*` features) are *less* likely to be non-responders (i.e., are more likely to respond).
+
+People who have higher baseline PHQ scores (`y_base` feature) are *less* likely to be non-responders (i.e., are more likely to respond). These people have a higher ceiling from which to drop down.
+
+People who have less negative change in PHQ-9 scores from baseline (i.e., whose scores *increase, stay the same, or only slightly decrease*; `phq9_change_bl` features) are *more* likely to be non-responders. These people are not experiencing early benefit from the app.
+
+**Key Takeaways**: Engaging more, broadly (total time) and with BA-specific components, makes you more likely to respond to treatment. More severe depression at baseline increases the likelihood of responding to treatment. People who start to respond in the first two weeks are more likely to respond at 12 weeks.
+
+Get normalization parameters
+```{r}
+norm_params_phq2 <- tidy(rec_prepped_full, number = 2) # step 2 is normalization
+
+# filter down to retained variables
+norm_params_retained_phq2 <- norm_params_phq2 |> 
+  filter(terms %in% retained_vars_phq2$term)
+
+# pivot wider
+norm_params_retained_phq2 <- norm_params_retained_phq2 |> 
+  select(terms, statistic, value) |> 
+  pivot_wider(names_from = statistic, values_from = value)
+
+knitr::kable(norm_params_retained_phq2, digits = 6)
+
+# will then need to do:
+# ((feature value - mean) / sd ) * parameter estimate
+```
+
+### Fit final model: Engagement + clinical, through Week 3
+
+```{r}
+rec <- build_recipe(d = d, config = best_config_phq3)
+
+rec_prepped_full <- rec |> 
+  prep(training = d)
+
+feat_all <- rec_prepped_full |> 
+  bake(new_data = NULL)
+
+penalty_weights <- c(0, rep(1, ncol(feat_all) - 2))
+
+model_best_full_phq3 <- fit_best_model(best_model = best_config_phq3, 
+                                       feat = feat_all, 
+                                       ml_mode = ml_mode,
+                                       algorithm = algorithm,
+                                       penalty_weights = penalty_weights)
+```
+
+#### Model coefficients
+
+**NOTE**: Coefficients are naturally inverted (i.e., positive class ["non-responder"] treated as first [vs. second] class). Here, we multiply coefficients by -1 to align the direction of coefficients with the rest of our analyses. Once flipped (i.e., as they appear below)...
+
+A *positive coefficient* indicates that increases in the feature *increase* the likelihood of being a non-responder. 
+
+A *negative coefficient* indicates that increases in the feature *decrease* the likelihood of being a non-responder (i.e., increase the likelihood of responding).
+
+```{r}
+model_tidy_phq3 <- tidy(model_best_full_phq3)
+
+model_tidy_phq3 |> 
+  write_csv("~/Desktop/musc/dahne_lab/moodivate/model_best_phq3_tidy.csv")
+
+```
+
+Table of all "retained" features (i.e., features whose parameter estimates were non-zero; parameter estimates of 0 indicate removal from the model via LASSO selection). 
+
+```{r}
+retained_vars_phq3 <- model_tidy_phq3 |> 
+  mutate(estimate = estimate * -1) |> 
+  filter(abs(estimate) > 0) |> 
+  select(-penalty) |> 
+  arrange(desc(abs(estimate)))
+
+knitr::kable(retained_vars_phq3, digits = 6)
+```
+
+So, we see that:
+
+People who spend more time in the app in Week 2 (`total_time_wk2` feature) are *less* likely to be non-responders (i.e., are more likely to respond). People who spend more time in-app in Week 1 or Week 3 are *more* likely to be non-responders. 
+
+People who have a higher average session time in Week 3 (`average_session_time_wk3` feature) are *less* likely to be non-responders (i.e., are more likely to respond).
+
+People who have a higher session count across weeks (`session_count_wk*` features) are *less* likely to be non-responders (i.e., are more likely to respond). 
+
+People whose time spent in the app increases over time (i.e., time spent in the app in Week 3 is higher than in Week 1 or than the average across Weeks 1 & 2) are *more* likely to be non-responders (i.e., are less likely to respond). Given raw values of these variables across responder and non-responder groups (people who respond used the app more in earlier weeks), responders have a higher ceiling from which to drop down.
+
+People who have higher baseline PHQ scores (`y_base` feature) are *less* likely to be non-responders (i.e., are more likely to respond). These people have a higher ceiling from which to drop down.
+
+People who have less negative change in PHQ-9 scores from baseline (i.e., whose scores *increase, stay the same, or only slightly decrease*; `phq9_change_bl` features) are *more* likely to be non-responders. These people are not experiencing early benefit from the app.
+
+**Key Takeaways**: Engaging more broadly (total time, session count, and average session time) generally makes you more likely to respond to treatment. Greater change in total time in-app, which is likely indicative of low time in-app in early weeks, makes you less likely to respond to treatment. More severe depression at baseline increases the likelihood of responding to treatment. People who start to respond in the first three weeks are more likely to respond at 12 weeks.
+
+Get normalization parameters
+```{r}
+norm_params_phq3 <- tidy(rec_prepped_full, number = 2) # step 2 is normalization
+
+# filter down to retained variables
+norm_params_retained_phq3 <- norm_params_phq3 |> 
+  filter(terms %in% retained_vars_phq3$term)
+
+# pivot wider
+norm_params_retained_phq3 <- norm_params_retained_phq3 |> 
+  select(terms, statistic, value) |> 
+  pivot_wider(names_from = statistic, values_from = value)
+
+knitr::kable(norm_params_retained_phq3, digits = 6)
+
+# will then need to do:
+# ((feature value - mean) / sd ) * parameter estimate
+```
+
+### Fit final model: Engagement + clinical, through Week 4
+
+```{r}
+rec <- build_recipe(d = d, config = best_config_phq4)
+
+rec_prepped_full <- rec |> 
+  prep(training = d)
+
+feat_all <- rec_prepped_full |> 
+  bake(new_data = NULL)
+
+penalty_weights <- c(0, rep(1, ncol(feat_all) - 2))
+
+model_best_full_phq4 <- fit_best_model(best_model = best_config_phq4, 
+                                       feat = feat_all, 
+                                       ml_mode = ml_mode,
+                                       algorithm = algorithm,
+                                       penalty_weights = penalty_weights)
+```
+
+#### Model coefficients
+
+**NOTE**: Coefficients are naturally inverted (i.e., positive class ["non-responder"] treated as first [vs. second] class). Here, we multiply coefficients by -1 to align the direction of coefficients with the rest of our analyses. Once flipped (i.e., as they appear below)...
+
+A *positive coefficient* indicates that increases in the feature *increase* the likelihood of being a non-responder. 
+
+A *negative coefficient* indicates that increases in the feature *decrease* the likelihood of being a non-responder (i.e., increase the likelihood of responding).
+
+```{r}
+model_tidy_phq4 <- tidy(model_best_full_phq4)
+
+model_tidy_phq4 |> 
+  write_csv("~/Desktop/musc/dahne_lab/moodivate/model_best_phq4_tidy.csv")
+
+```
+
+Table of all "retained" features (i.e., features whose parameter estimates were non-zero; parameter estimates of 0 indicate removal from the model via LASSO selection). 
+
+```{r}
+retained_vars_phq4 <- model_tidy_phq4 |> 
+  mutate(estimate = estimate * -1) |> 
+  filter(abs(estimate) > 0) |> 
+  select(-penalty) |> 
+  arrange(desc(abs(estimate)))
+
+knitr::kable(retained_vars_phq4, digits = 6)
+```
+
+So, we see that:
+
+People who spend more time in the app across weeks (`total_time_wk*` features) are typically *less* likely to be non-responders (i.e., are more likely to respond). The exception is time in-app in Week 3, where more time in-app *increases* the likelihood of not responding.
+
+People who have more discrete app sessions across weeks (`session_count_*` features) are *less* likely to be non-responders (i.e., are more likely to respond). 
+
+People who have greater average session times in Week 3 (`average_session_time_wk3`) are *less* likely to be non-responders (i.e., are more likely to respond).
+
+People who have greater change from early weeks to later weeks (`total_time_chg_*` features) are typically *more* likely to be non-responders (i.e., are less likely to respond). Given raw values of these variables across responder and non-responder groups (people who respond used the app more in earlier weeks), responders have a higher ceiling from which to drop down. The exception is change in time in-app from Week 4 from the previous average, where greater time in Week 4 (vs. average of Weeks 1-3) makes you *less* likely to be a non-responder (i.e., are more likely to respond).
+
+People who have higher baseline PHQ scores (`y_base` feature) are *less* likely to be non-responders (i.e., are more likely to respond). These people have a higher ceiling from which to drop down.
+
+People who have less negative change in PHQ-9 scores from baseline (i.e., whose scores *increase, stay the same, or only slightly decrease*; `phq9_change_bl` features) are *more* likely to be non-responders. These people are not experiencing early benefit from the app.
+
+**Key Takeaways**: Engaging more broadly (total time, number of sessions, average session length) across weeks generally makes you more likely to respond to treatment. People More severe depression at baseline increases the likelihood of responding to treatment. Greater change in total time in-app in later weeks vs. earlier weeks, which is likely indicative of low time in-app in early weeks, generally makes you less likely to respond to treatment. More severe depression at baseline increases the likelihood of responding to treatment. People who start to respond in the first four weeks are more likely to respond at 12 weeks.
+
+Get normalization parameters
+```{r}
+norm_params_phq4 <- tidy(rec_prepped_full, number = 2) # step 2 is normalization
+
+# filter down to retained variables
+norm_params_retained_phq4 <- norm_params_phq4 |> 
+  filter(terms %in% retained_vars_phq4$term)
+
+# pivot wider
+norm_params_retained_phq4 <- norm_params_retained_phq4 |> 
+  select(terms, statistic, value) |> 
+  pivot_wider(names_from = statistic, values_from = value)
+
+knitr::kable(norm_params_retained_phq4, digits = 6)
+
+# will then need to do:
+# ((feature value - mean) / sd ) * parameter estimate
+```
+
+
+## Model Calibration
+
+To evaluate model calibration, we need to make predictions from each *final, best selected model configuration* for each observation when held-out. We will fit each best configuration on N-1 observations (341) and predicting the Nth (342nd), held-out observation. This method helps to keep each model as close to the final best model as possible (training set differs by only 1 observation). 
+
+* Use only best configuration for each context (X6)
+* Get predicted probabilities X4: raw, beta-calibrated, logistic-calibrated, isotonic-calibrated
+
+### Get probabilities for held-out observations
+
+Create function
+
+```{r fcn_get_final_probs}
+get_final_probs <- function(i_sub, best_config, d){
+  
+  # hold out single subject
+  d_out <- d |> 
+    filter(record_id == i_sub)
+  
+  d_in <- d |> 
+    filter(record_id != i_sub)
+  
+  # prep recipe 
+  rec <- build_recipe(d = d_in, config = best_config)
+  rec_prepped <- rec |> 
+    prep(training = d_in, strings_as_factors = FALSE)
+  
+  # bake feat_in and feat_out
+  feat_in <- rec_prepped |> 
+    bake(new_data = NULL)
+  
+  feat_out <- rec_prepped |> 
+    bake(new_data = d_out)
+  
+  # set penalty_weights
+  penalty_weights <- c(0, rep(1, ncol(feat_in) - 2))
+  
+  # fit model
+  model_best <- fit_best_model(best_model = best_config, 
+                               feat = feat_in, 
+                               ml_mode = ml_mode,
+                               algorithm = algorithm,
+                               penalty_weights = penalty_weights)
+  
+  # raw (uncalibrated) predictions
+  preds_prob <- predict(model_best, feat_out,
+                        type = "prob")
+  
+  # fit calibration model
+  set.seed(2468)
+  cal_split <- d_in |> 
+    initial_split(prop = 3/4, strata = y)
+  d_cal_in <- training(cal_split) 
+  d_cal_out <- testing(cal_split)
+  
+  rec_cal_prepped <- rec |> 
+    prep(training = d_cal_in, strings_as_factors = FALSE)
+  
+  feat_cal_in <- rec_cal_prepped |> 
+    bake(new_data = NULL) 
+  
+  feat_cal_out <- rec_cal_prepped |> 
+    bake(new_data = d_cal_out) 
+  
+  penalty_weights_cal <- c(0, rep(1, ncol(feat_cal_in) - 2))
+  
+  model_cal <- fit_best_model(best_model = best_config, 
+                              feat = feat_cal_in,
+                              ml_mode = ml_mode,
+                              algorithm = algorithm,
+                              penalty_weights = penalty_weights)
+  
+  # beta calibration
+  beta <- predict(model_cal, feat_cal_out,
+                  type = "prob") |>
+    mutate(truth = feat_cal_out$y) |>
+    cal_estimate_beta(truth = truth,
+                      estimate = dplyr::starts_with(".pred_"),
+                      smooth = TRUE)
+  preds_prob_beta <- preds_prob |>
+    cal_apply(beta)
+  
+  # iso calibration
+  iso <- predict(model_cal, feat_cal_out,
+                 type = "prob") |>
+    mutate(truth = feat_cal_out$y) |>
+    cal_estimate_isotonic(truth = truth,
+                          estimate = dplyr::starts_with(".pred_"))
+  preds_prob_iso <- preds_prob |>
+    cal_apply(iso)
+  
+  # logistic calibration
+  logi <- predict(model_cal, feat_cal_out,
+                  type = "prob") |>
+    mutate(truth = feat_cal_out$y) |>
+    cal_estimate_logistic(truth = truth,
+                          estimate = dplyr::starts_with(".pred_"),
+                          smooth = TRUE)
+  preds_prob_logi <- preds_prob |>
+    cal_apply(logi)
+  
+  # combine raw and calibrated probs
+  probs <- tibble(record_id = d_out$record_id,
+                  model = best_config$feature_set,
+                  prob_raw = preds_prob[[".pred_non_responder"]],
+                  prob_beta = preds_prob_beta[[".pred_non_responder"]],
+                  prob_iso = preds_prob_iso[[".pred_non_responder"]],
+                  prob_logi = preds_prob_logi[[".pred_non_responder"]]) 
+}
+
+```
+
+Map over participants so that each is held-out once
+
+```{r}
+# engagement-only, week 2
+probs_eda2 <- d$record_id |> 
+  map(\(i_sub) get_final_probs(i_sub, best_config = best_config_eda2, d)) |> 
+  list_rbind()
+
+# engagement-only, week 3
+probs_eda3 <- d$record_id |> 
+  map(\(i_sub) get_final_probs(i_sub, best_config = best_config_eda3, d)) |> 
+  list_rbind()
+
+# engagement-only, week 4
+probs_eda4 <- d$record_id |> 
+  map(\(i_sub) get_final_probs(i_sub, best_config = best_config_eda4, d)) |> 
+  list_rbind()
+
+# engagement + clinical, week 2
+probs_phq2 <- d$record_id |> 
+  map(\(i_sub) get_final_probs(i_sub, best_config = best_config_phq2, d)) |> 
+  list_rbind()
+
+# engagement + clinical, week 3
+probs_phq3 <- d$record_id |> 
+  map(\(i_sub) get_final_probs(i_sub, best_config = best_config_phq3, d)) |> 
+  list_rbind()
+
+# engagement + clinical, week 4
+probs_phq4 <- d$record_id |> 
+  map(\(i_sub) get_final_probs(i_sub, best_config = best_config_phq4, d)) |> 
+  list_rbind()
+```
+
+### Evaluating model calibration
+
+#### Engagement-only, through Week 2
+
+Compare mean non-response rate from RCT to predicted probabilities across calibrations
+```{r}
+d_eda2 <- d |> 
+  select(record_id, y) |> 
+  left_join(probs_eda2, by = "record_id") |> 
+  mutate(y_num = if_else(y == "non_responder", 1, 0))
+
+d_eda2 |> 
+  summarize(mean_y = mean(y_num),
+            mean_raw = mean(prob_raw),
+            mean_beta = mean(prob_beta),
+            mean_iso = mean(prob_iso),
+            mean_logi = mean(prob_logi))
+```
+Raw probabilities match best. Beta- and logistic-calibrated probabilities are close; isotonic-calibrated probabilities are far off.
+
+Plot calibration
+```{r}
+# pivot to long format
+d_plot_eda2 <- d_eda2 |> 
+  pivot_longer(
+    cols = c(prob_raw, prob_beta, prob_logi, prob_iso),
+    names_to = "method",
+    values_to = ".pred_non_responder"
+  )
+
+d_plot_eda2 |> 
+  cal_plot_breaks(truth = y,
+                  estimate = .pred_non_responder,
+                  .by = method)
+
+d_plot_eda2 |> 
+  cal_plot_windowed(truth = y,
+                    estimate = .pred_non_responder,
+                    .by = method)
+```
+Raw probabilities are the best calibrated.
+
+Brier scores
+```{r}
+# raw probabilities
+brier_class_vec(truth = d_eda2$y,
+                estimate = d_eda2$prob_raw)
+
+# beta calibrated probabilities
+brier_class_vec(truth = d_eda2$y,
+                estimate = d_eda2$prob_beta)
+
+# logistic calibrated probabilities
+brier_class_vec(truth = d_eda2$y,
+                estimate = d_eda2$prob_logi)
+
+# isotonic calibrated probabilities
+brier_class_vec(truth = d_eda2$y,
+                estimate = d_eda2$prob_iso)
+```
+Raw calibration has the lowest Brier score. In keeping with other methods above, beta and logistic are next-best followed by isotonic calibration, which has the highest Brier score.
+
+#### Engagement-only, through Week 3
+
+Compare mean non-response rate from RCT to predicted probabilities across calibrations
+```{r}
+d_eda3 <- d |> 
+  select(record_id, y) |> 
+  left_join(probs_eda3, by = "record_id") |> 
+  mutate(y_num = if_else(y == "non_responder", 1, 0))
+
+d_eda3 |> 
+  summarize(mean_y = mean(y_num),
+            mean_raw = mean(prob_raw),
+            mean_beta = mean(prob_beta),
+            mean_iso = mean(prob_iso),
+            mean_logi = mean(prob_logi))
+```
+Raw probabilities match best. Beta- and logistic-calibrated probabilities are next-closest; isotonic-calibrated probabilities are far off.
+
+Plot calibration
+```{r}
+# pivot to long format
+d_plot_eda3 <- d_eda3 |> 
+  pivot_longer(
+    cols = c(prob_raw, prob_beta, prob_logi, prob_iso),
+    names_to = "method",
+    values_to = ".pred_non_responder"
+  )
+
+d_plot_eda3 |> 
+  cal_plot_breaks(truth = y,
+                  estimate = .pred_non_responder,
+                  .by = method)
+
+d_plot_eda3 |> 
+  cal_plot_windowed(truth = y,
+                    estimate = .pred_non_responder,
+                    .by = method)
+```
+Raw probabilities are the best calibrated, though not good for probabilities above 0.7.
+
+Brier scores
+```{r}
+# raw probabilities
+brier_class_vec(truth = d_eda3$y,
+                estimate = d_eda3$prob_raw)
+
+# beta calibrated probabilities
+brier_class_vec(truth = d_eda3$y,
+                estimate = d_eda3$prob_beta)
+
+# logistic calibrated probabilities
+brier_class_vec(truth = d_eda3$y,
+                estimate = d_eda3$prob_logi)
+
+# isotonic calibrated probabilities
+brier_class_vec(truth = d_eda3$y,
+                estimate = d_eda3$prob_iso)
+```
+Raw calibration has the lowest Brier score. In keeping with other methods above, beta and logistic are next-best followed by isotonic calibration, which has the highest Brier score.
+
+#### Engagement-only, through Week 4
+
+Compare mean non-response rate from RCT to predicted probabilities across calibrations
+```{r}
+d_eda4 <- d |> 
+  select(record_id, y) |> 
+  left_join(probs_eda4, by = "record_id") |> 
+  mutate(y_num = if_else(y == "non_responder", 1, 0))
+
+d_eda4 |> 
+  summarize(mean_y = mean(y_num),
+            mean_raw = mean(prob_raw),
+            mean_beta = mean(prob_beta),
+            mean_iso = mean(prob_iso),
+            mean_logi = mean(prob_logi))
+```
+Raw probabilities match best. Beta- and logistic-calibrated probabilities are next-closest; isotonic-calibrated probabilities are farther off.
+
+Plot calibration
+```{r}
+# pivot to long format
+d_plot_eda4 <- d_eda4 |> 
+  pivot_longer(
+    cols = c(prob_raw, prob_beta, prob_logi, prob_iso),
+    names_to = "method",
+    values_to = ".pred_non_responder"
+  )
+
+d_plot_eda4 |> 
+  cal_plot_breaks(truth = y,
+                  estimate = .pred_non_responder,
+                  .by = method)
+
+d_plot_eda4 |> 
+  cal_plot_windowed(truth = y,
+                    estimate = .pred_non_responder,
+                    .by = method)
+```
+Raw probabilities are the best calibrated, though not great.
+
+Brier scores
+```{r}
+# raw probabilities
+brier_class_vec(truth = d_eda4$y,
+                estimate = d_eda4$prob_raw)
+
+# beta calibrated probabilities
+brier_class_vec(truth = d_eda4$y,
+                estimate = d_eda4$prob_beta)
+
+# logistic calibrated probabilities
+brier_class_vec(truth = d_eda4$y,
+                estimate = d_eda4$prob_logi)
+
+# isotonic calibrated probabilities
+brier_class_vec(truth = d_eda4$y,
+                estimate = d_eda4$prob_iso)
+```
+Raw calibration has the lowest Brier score. In keeping with other methods above, beta and logistic are next-best followed by isotonic calibration, which has the highest Brier score.
+
+#### Engagement + clinical, through Week 2
+
+Compare mean non-response rate from RCT to predicted probabilities across calibrations
+```{r}
+d_phq2 <- d |> 
+  select(record_id, y) |> 
+  left_join(probs_phq2, by = "record_id") |> 
+  mutate(y_num = if_else(y == "non_responder", 1, 0))
+
+d_phq2 |> 
+  summarize(mean_y = mean(y_num),
+            mean_raw = mean(prob_raw),
+            mean_beta = mean(prob_beta),
+            mean_iso = mean(prob_iso),
+            mean_logi = mean(prob_logi))
+```
+Raw probabilities match best. Beta- and logistic-calibrated probabilities are next-closest; isotonic-calibrated probabilities are far off.
+
+Plot calibration
+```{r}
+# pivot to long format
+d_plot_phq2 <- d_phq2 |> 
+  pivot_longer(
+    cols = c(prob_raw, prob_beta, prob_logi, prob_iso),
+    names_to = "method",
+    values_to = ".pred_non_responder"
+  )
+
+d_plot_phq2 |> 
+  cal_plot_breaks(truth = y,
+                  estimate = .pred_non_responder,
+                  .by = method)
+
+d_plot_phq2 |> 
+  cal_plot_windowed(truth = y,
+                    estimate = .pred_non_responder,
+                    .by = method)
+```
+Raw probabilities are the best calibrated, though calibration drops off among highest probabilities.
+
+Brier scores
+```{r}
+# raw probabilities
+brier_class_vec(truth = d_phq2$y,
+                estimate = d_phq2$prob_raw)
+
+# beta calibrated probabilities
+brier_class_vec(truth = d_phq2$y,
+                estimate = d_phq2$prob_beta)
+
+# logistic calibrated probabilities
+brier_class_vec(truth = d_phq2$y,
+                estimate = d_phq2$prob_logi)
+
+# isotonic calibrated probabilities
+brier_class_vec(truth = d_phq2$y,
+                estimate = d_phq2$prob_iso)
+```
+Raw calibration has the lowest Brier score. In keeping with other methods above, beta and logistic are next-best followed by isotonic calibration, which has the highest Brier score.
+
+#### Engagement + clinical, through Week 3
+
+Compare mean non-response rate from RCT to predicted probabilities across calibrations
+```{r}
+d_phq3 <- d |> 
+  select(record_id, y) |> 
+  left_join(probs_phq3, by = "record_id") |> 
+  mutate(y_num = if_else(y == "non_responder", 1, 0))
+
+d_phq3 |> 
+  summarize(mean_y = mean(y_num),
+            mean_raw = mean(prob_raw),
+            mean_beta = mean(prob_beta),
+            mean_iso = mean(prob_iso),
+            mean_logi = mean(prob_logi))
+```
+Raw probabilities match best. Beta- and logistic-calibrated probabilities are next-closest; isotonic-calibrated probabilities are far off.
+
+Plot calibration
+```{r}
+# pivot to long format
+d_plot_phq3 <- d_phq3 |> 
+  pivot_longer(
+    cols = c(prob_raw, prob_beta, prob_logi, prob_iso),
+    names_to = "method",
+    values_to = ".pred_non_responder"
+  )
+
+d_plot_phq3 |> 
+  cal_plot_breaks(truth = y,
+                  estimate = .pred_non_responder,
+                  .by = method)
+
+d_plot_phq3 |> 
+  cal_plot_windowed(truth = y,
+                    estimate = .pred_non_responder,
+                    .by = method)
+```
+Raw probabilities are the best calibrated.
+
+Brier scores
+```{r}
+# raw probabilities
+brier_class_vec(truth = d_phq3$y,
+                estimate = d_phq3$prob_raw)
+
+# beta calibrated probabilities
+brier_class_vec(truth = d_phq3$y,
+                estimate = d_phq3$prob_beta)
+
+# logistic calibrated probabilities
+brier_class_vec(truth = d_phq3$y,
+                estimate = d_phq3$prob_logi)
+
+# isotonic calibrated probabilities
+brier_class_vec(truth = d_phq3$y,
+                estimate = d_phq3$prob_iso)
+```
+Raw calibration has the lowest Brier score. In keeping with other methods above, beta and logistic are next-best followed by isotonic calibration, which has the highest Brier score.
+
+#### Engagement + clinical, through Week 4
+
+Compare mean non-response rate from RCT to predicted probabilities across calibrations
+```{r}
+d_phq4 <- d |> 
+  select(record_id, y) |> 
+  left_join(probs_phq4, by = "record_id") |> 
+  mutate(y_num = if_else(y == "non_responder", 1, 0))
+
+d_phq4 |> 
+  summarize(mean_y = mean(y_num),
+            mean_raw = mean(prob_raw),
+            mean_beta = mean(prob_beta),
+            mean_iso = mean(prob_iso),
+            mean_logi = mean(prob_logi))
+```
+Raw probabilities match best. Beta- and logistic-calibrated probabilities are next-closest; isotonic-calibrated probabilities are far off.
+
+Plot calibration
+```{r}
+# pivot to long format
+d_plot_phq4 <- d_phq4 |> 
+  pivot_longer(
+    cols = c(prob_raw, prob_beta, prob_logi, prob_iso),
+    names_to = "method",
+    values_to = ".pred_non_responder"
+  )
+
+d_plot_phq4 |> 
+  cal_plot_breaks(truth = y,
+                  estimate = .pred_non_responder,
+                  .by = method)
+
+d_plot_phq4 |> 
+  cal_plot_windowed(truth = y,
+                    estimate = .pred_non_responder,
+                    .by = method)
+```
+Raw probabilities are the best calibrated.
+
+Brier scores
+```{r}
+# raw probabilities
+brier_class_vec(truth = d_phq4$y,
+                estimate = d_phq4$prob_raw)
+
+# beta calibrated probabilities
+brier_class_vec(truth = d_phq4$y,
+                estimate = d_phq4$prob_beta)
+
+# logistic calibrated probabilities
+brier_class_vec(truth = d_phq4$y,
+                estimate = d_phq4$prob_logi)
+
+# isotonic calibrated probabilities
+brier_class_vec(truth = d_phq4$y,
+                estimate = d_phq4$prob_iso)
+```
+Raw calibration has the lowest Brier score. In keeping with other methods above, beta and logistic are next-best followed by isotonic calibration, which has the highest Brier score.
+
+### Make paneled figure
+
+Set up plotting data (combined across)
+```{r}
+d_plot <- d_plot_eda2 |> 
+  bind_rows(d_plot_eda3) |> 
+  bind_rows(d_plot_eda4) |> 
+  bind_rows(d_plot_phq2) |> 
+  bind_rows(d_plot_phq3) |> 
+  bind_rows(d_plot_phq4) |> 
+  filter(method == "prob_raw") |> 
+  select(record_id, y, model, .pred_non_responder) |> 
+  mutate(data_type = if_else(str_detect(model, "phq"), "Eng+Clin", "Eng-Only"),
+         week = str_sub(model, start = -1L, end = -1L)) |> 
+  select(-model) |> 
+  mutate(Model = str_c(data_type, ", Wk", week))
   
 ```
+
+Plot calibration by model configuration
+```{r}
+d_plot |> 
+  cal_plot_breaks(truth = y,
+                  estimate = .pred_non_responder,
+                  .by = Model) +
+  labs(x = "Predicted Probability of Non-Response (bin mid-point)",
+       y = "Observed Non-Response")
+```
+
 
