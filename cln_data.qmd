@@ -1,0 +1,170 @@
+---
+title: "Clean & Prepare Data"
+author: "Gaylen Fronk"
+format: html
+---
+
+# Setup
+
+Load libraries
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+```
+
+## Read in data
+
+```{r}
+d <- read_csv("~/Desktop/musc/dahne_lab/moodivate/data_raw.csv", 
+              show_col_types = FALSE)
+```
+
+## Prepare data 
+
+### Create outcome & baseline variables
+
+```{r}
+d <- d |> 
+  mutate(phq9_outcome_cat = if_else(phq9_change_bl_w12 > -5, 
+                                   "NonResponder", 
+                                   "Responder", 
+                                   NA_character_)) |> 
+  mutate(phq9_outcome_cat = factor(phq9_outcome_cat)) |> 
+  rename(phq9_outcome_cont = phq9_change_bl_w12, 
+         phq9_baseline = phq9_score_bl)
+```
+
+### Subset to participants with outcome data
+
+```{r}
+d <- d |> 
+  filter(!is.na(phq9_outcome_cat))
+```
+
+### Clean up
+
+Remove BDI variables & PHQ8 scores, remove predictors from after week 4, fix naming inconsistencies, remove "complete_activity" variables (decided not meaningful)
+
+```{r}
+d <- d |> 
+  # standardize naming
+  rename_with(~ str_replace(.x, "_wk", "_w")) |> 
+  rename_with(~ str_replace(.x, "_w", "_wk")) |> 
+  # remove unnecessary variables
+  select(-starts_with("bdi"), 
+         -ends_with(str_c("_wk", 5:12)),
+         -starts_with("phq8_score"),
+         -starts_with("phq8_change"),
+         -starts_with("complete_activity")) |> 
+  # fix scale for total time & average session time variables
+  mutate(across(c(starts_with("total_time"), starts_with("average")),
+                ~ .x / 60))
+```
+
+### LOCF for PHQ data
+
+```{r}
+d <- d |> 
+  # wk1: no change from baseline because would carry baseline score forward
+  mutate(phq9_change_bl_wk1 = if_else(is.na(phq9_change_bl_wk1),
+                                     0,
+                                     phq9_change_bl_wk1)) |> 
+  # later weeks: carry change from baseline forward
+  mutate(phq9_change_bl_wk2 = if_else(is.na(phq9_change_bl_wk2),
+                                     phq9_change_bl_wk1, 
+                                     phq9_change_bl_wk2)) |> 
+  mutate(phq9_change_bl_wk3 = if_else(is.na(phq9_change_bl_wk3),
+                                     phq9_change_bl_wk2, 
+                                     phq9_change_bl_wk3)) |> 
+  mutate(phq9_change_bl_wk4 = if_else(is.na(phq9_change_bl_wk4),
+                                     phq9_change_bl_wk3, 
+                                     phq9_change_bl_wk4))
+```
+
+### Create within subjects variables
+
+```{r}
+# Identify all variables ending with _wk#
+all_week_vars <- d |> 
+  select(contains("_wk") & !starts_with("phq9")) |> 
+  names()
+
+# Identify the "base names" (everything before "_wk#")
+stem_vars <- unique(str_remove(all_week_vars, "_wk\\d+$"))
+
+for (stem in stem_vars) {
+  
+  later_week_vars <- str_c(stem, "_wk", 2:4)
+  
+  # 1) Change from week 1
+  d[str_c(stem, "_chg_wk1_wk", 2:4)] <-
+    d[later_week_vars] - d[[str_c(stem, "_wk1")]]
+  
+  # 2) Change from average of all previous weeks
+  d[str_c(stem, "_chg_from_avg_wk", 3:4)] <-
+    map_dfc(3:4, function(week_num) {
+      prev_cols <- str_c(stem, "_wk", 1:(week_num - 1))
+      d[[str_c(stem, "_wk", week_num)]] -
+        rowMeans(d[prev_cols], na.rm = TRUE)
+    })
+  
+  # 3) Change from previous week
+  d[str_c(stem, "_chg_from_prev_wk", 3:4)] <-
+    map_dfc(3:4, function(week_num) {
+      prev_cols <- str_c(stem, "_wk", 1:(week_num - 1))
+      d[[str_c(stem, "_wk", week_num)]] -
+        d[[str_c(stem, "_wk", week_num - 1)]]
+    })
+}
+```
+
+## Glimpse
+
+```{r}
+glimpse(d)
+```
+
+## Write out cleaned data file
+
+```{r}
+d |> 
+  write_csv("~/Desktop/musc/dahne_lab/moodivate/data_clean.csv")
+```
+
+## EDA Table
+
+```{r}
+library(gtsummary)
+tblsum_object <- d |>
+  tbl_summary(by = phq9_outcome_cat,
+              include = !c(record_id),
+              digits = all_continuous() ~ 2
+  ) |>
+  add_overall() |>
+  modify_header(label ~ "Predictor") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "Response Category (PHQ9)") |>
+  add_p(test.args = c("mood_days_wk4",
+                      "mood_days_wk2",
+                      "mood_days_chg_from_prev_wk3") ~ list(
+                         simulate.p.value = TRUE
+                       ),
+        pvalue_fun = label_style_pvalue(digits = 3))
+```
+
+Results of basic EDA:
+
+p-values < 0.1 & > 0.05:
+session_count_wk3, average_session_time_wk3, completed_activities_wk1, mood_days_wk1, add_goal_chg_wk1_wk3/4, add_goal_chg_from_avg_wk3/4, badges_earned_chg_wk1_wk4, badges_earned_chg_from_avg_wk4, phq8_comp_chg_wk1_wk4
+
+p-values < 0.05:
+session_count_wk1/2/4, total_time_wk1/2/3/4, schedule_activity_wk1/2/3/4, scheduled_activities_wk1/2/3/4, completed_activities_wk3/4, add_goal_wk1, badges_earned_wk1/3, total_time_chg_wk1_wk3/4, total_time_chg_from_avg_wk3/4, schedule_activity_chg_from_prev_wk3
+
+session_count_wk1
+session_count_wk2
+total_time_wk1
+total_time_wk2
+schedule_activity_wk1
+schedule_activity_wk2
+scheduled_activities_wk1
+scheduled_activities_wk2
+add_goal_wk1
+badges_earned_wk1
