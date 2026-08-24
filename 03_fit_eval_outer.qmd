@@ -10,6 +10,7 @@ Load libraries
 ```{r, message = FALSE}
 library(tidyverse)
 library(tidymodels)
+library(tidyposterior)
 ```
 
 Source functions file
@@ -33,120 +34,103 @@ Metrics averaged across inner folds (10 folds per average) for each unique model
 
 ```{r}
 metrics_avg <- read_csv(
-  "~/Desktop/dahne_lab/moodivate/metrics_inner_avg.csv",
+  "~/Desktop/musc/dahne_lab/moodivate/metrics_inner_avg.csv", 
   show_col_types = FALSE)
+
+glimpse(metrics_avg)
 ```
 
 ### Select best configurations
 
-We select the best model configuration for each outer fold for each feature set. Specifically, these are the model configurations that produce the highest average performance across *validation sets* (held-out inner folds) in each outer fold for each feature set. 
+We select the best model configuration for each outer fold for each combination of week and PHQ vs. no-PHQ. Specifically, these are the model configurations that produce the highest average performance across *validation sets* (held-out inner folds) in each outer fold for each combination. 
 
-In the case of ties (i.e., equal AUC across multiple configurations in an outer split and feature set), we:
+In the case of ties (i.e., equal AUC across multiple configurations in an outer split/week/PHQ), we:
 
 1. Choose the configuration(s) with the lowest alpha (`hp1`) to prefer a parsimonious model.
 
 2. Randomly select among remaining tied configurations (i.e., same AUC and same lowest alpha hyperparameter).
 
-```{r best_model_2}
+Best configurations "grouped" (to see performance "crossing" of week by PHQ/no)
+```{r}
 set.seed(11397)
-configs_best <- metrics_avg |> 
-  # negate hp1 so that we can prefer the max (hp1 closest to 0)
-  mutate(inv_hp1 = hp1 * -1) |> 
-  group_by(feature_set, outer_split_num) |> 
-  # select config w max roc_auc with lowest hp1 (highest inv_hp1)
+configs_best_grp <- metrics_avg |> 
+  group_by(outer_split_num, week, phq) |> 
+  # select config w max roc_auc with highest hp1 (closest to lasso)
   # keep remaining ties (i.e., same roc_auc and same hp1)
-  slice_max(order_by = tibble(roc_auc, inv_hp1), with_ties = TRUE) |> 
+  slice_max(order_by = tibble(roc_auc, hp1), with_ties = TRUE) |> 
   ungroup() |> 
-  group_by(feature_set, outer_split_num) |> 
+  group_by(outer_split_num, week, phq) |> 
   # among remaining ties, randomly select single config 
   slice_sample(n = 1) |> 
-  select(-inv_hp1) |> 
   ungroup()
 
-configs_best |> 
-  select(outer_split_num, feature_set, hp1, hp2, roc_auc) |> 
+configs_best_grp |> 
+  select(outer_split_num, week, phq, feature_set, roc_auc) |> 
+  arrange(week, phq) |> 
   print(n = Inf)
 
+configs_best_grp |> 
+  group_by(week, phq) |> 
+  summarize(median_auc = median(roc_auc),
+            min_auc = min(roc_auc),
+            max_auc = max(roc_auc),
+            mean_auc = mean(roc_auc))
 ```
 
 Looking at the mean and median performance of the best selected models in the inner loop, we see that there is relatively normal distribution of auROC values (mean and median values are similar). 
 
-**Models using data from Weeks 1 & 2**
-
+Most selected feature types
 ```{r}
-configs_best |> 
-  filter(feature_set == "thru_wk2") |> 
-  pull(roc_auc) |> 
-  mean()
-configs_best |> 
-  filter(feature_set == "thru_wk2") |> 
-  pull(roc_auc) |> 
-  median()
+configs_best_grp |> 
+  filter(phq == "phq") |> 
+  pull(feat_type) |> 
+  janitor::tabyl() |> 
+  arrange(desc(n))
+
+configs_best_grp |> 
+  filter(phq == "eda_only") |> 
+  pull(feat_type) |> 
+  janitor::tabyl() |> 
+  arrange(desc(n))
+
+configs_best_grp |> 
+  filter(week == "wk2") |> 
+  pull(feat_type) |> 
+  janitor::tabyl() |> 
+  arrange(desc(n))
+
+configs_best_grp |> 
+  filter(week == "wk3") |> 
+  pull(feat_type) |> 
+  janitor::tabyl() |> 
+  arrange(desc(n))
+
+configs_best_grp |> 
+  filter(week == "wk4") |> 
+  pull(feat_type) |> 
+  janitor::tabyl() |> 
+  arrange(desc(n))
+
 ```
 
-```{r}
-configs_best |> 
-  filter(feature_set == "thru_wk2") |> 
-  ggplot(aes(x = roc_auc)) +
-  geom_histogram(bins = 10)
-```
-
-**Models using data from Weeks 1, 2, & 3**
-
-```{r}
-configs_best |> 
-  filter(feature_set == "thru_wk3") |> 
-  pull(roc_auc) |> 
-  mean()
-configs_best |> 
-  filter(feature_set == "thru_wk3") |> 
-  pull(roc_auc) |> 
-  median()
-```
-
-```{r}
-configs_best |> 
-  filter(feature_set == "thru_wk3") |> 
-  ggplot(aes(x = roc_auc)) +
-  geom_histogram(bins = 10)
-```
-
-**Models using data from Weeks 1 through 4**
-
-```{r}
-configs_best |> 
-  filter(feature_set == "thru_wk4") |> 
-  pull(roc_auc) |> 
-  mean()
-configs_best |> 
-  filter(feature_set == "thru_wk4") |> 
-  pull(roc_auc) |> 
-  median()
-```
-
-```{r}
-configs_best |> 
-  filter(feature_set == "thru_wk4") |> 
-  ggplot(aes(x = roc_auc)) +
-  geom_histogram(bins = 10)
-```
 
 ## Read in data
 
 ```{r}
-d <- read_csv("~/Desktop/dahne_lab/moodivate/data_clean.csv", 
+d <- read_csv("~/Desktop/musc/dahne_lab/moodivate/data_clean.csv", 
               show_col_types = FALSE) |> 
   glimpse()
 ```
 
 ## Prepare data
 
-Following the same process as in script 01_fit_inner.qmd, we define our outcome variable (y_col_name) as `bdi_outcome`, which will be renamed as `y` to facilitate using cross-study functions and code. The two levels of the outcome variable (non-responder and responder) are set to have non-responder as the positive (event) level, as our goal is to identify non-responders to the Moodivate DMHI who should be stepped up to a higher level of care.
+Following the same process as in script 01_fit_inner.qmd, we define our outcome variable (y_col_name) as `phq_outcome_cat`, which will be renamed as `y` to facilitate using cross-study functions and code. The two levels of the outcome variable (non-responder and responder) are set to have non-responder as the positive (event) level, as our goal is to identify non-responders to the Moodivate DMHI who should be stepped up to a higher level of care.
 
 ```{r}
-y_col_name <- "bdi_outcome"
+y_col_name <- "phq9_outcome_cat"
 y_level_pos <- "non_responder"
 y_level_neg <- "responder"
+y_baseline <- "phq9_baseline"
 ```
 
 ### Class variables & set factor levels
@@ -156,21 +140,37 @@ d <- d |>
   # rename outcome to y
   rename(y = !!y_col_name) |> 
   mutate(y = case_when(
-    y == 0 ~ "non_responder",
-    y == 1 ~ "responder",
+    y == "NonResponder" ~ "non_responder",
+    y == "Responder" ~ "responder",
     TRUE ~ NA_character_)) %>% 
-  # y as a factor with two intuitive levels
+  # y as a factor with two levels, positive level first
   mutate(y = factor(y, levels = c(!!y_level_pos,
                                   !!y_level_neg))) |> 
-  # standardize naming
-  rename_with(~ str_replace(.x, "_w1", "_wk1")) |> 
-  rename_with(~ str_replace(.x, "_w2", "_wk2")) |> 
-  rename_with(~ str_replace(.x, "_w3", "_wk3")) |> 
-  rename_with(~ str_replace(.x, "_w4", "_wk4")) |>
-  # move bdi_baseline to be first variable in dataset for penalty.factor
-  relocate(bdi_baseline) 
-
-
+  # rename baseline to y_base
+  rename(y_base = !!y_baseline) |> 
+  # remove other outcome & baseline variables
+  select(-contains("outcome"), -contains("baseline")) |> 
+  # remove variables not included in ANY feature sets
+  select(record_id, y_base, y,
+         starts_with("session_count_w"),
+         average_session_time_wk3,
+         starts_with("total_time_w"),
+         starts_with("schedule_activity_w"),
+         starts_with("scheduled_activities_w"),
+         completed_activities_wk1, completed_activities_wk3, 
+         completed_activities_wk4, mood_days_wk1,
+         add_goal_wk1, add_goal_chg_wk1_wk3, add_goal_chg_wk1_wk4,
+         starts_with("add_goal_chg_from_avg"),
+         badges_earned_wk1, badges_earned_wk3,
+         badges_earned_chg_wk1_wk4, badges_earned_chg_from_avg_wk4,
+         total_time_chg_wk1_wk3, total_time_chg_wk1_wk4,
+         starts_with("total_time_chg_from_avg"),
+         schedule_activity_chg_from_prev_wk3,
+         phq8_comp_chg_wk1_wk4,
+         starts_with("phq9_change")) |> 
+  # move bdi_baseline/phq_baseline to be first variable in dataset
+  #for penalty.factor
+  relocate(y_base, y, everything()) 
 ```
 
 ## Fit outer loop models using best selected configurations
@@ -179,7 +179,7 @@ We follow the same model fitting process as in 01_fit_inner.qmd. The difference 
 
 Note that data are divided identically using the same seed.
 
-Models are fit using `fit_predict_eval()` from fun_moodivate.R - this function fits the model and makes predictions. We map over each held-out outer fold to produce 30 *test set* estimates of model performance.
+Models are fit using `fit_predict_eval()` from fun_moodivate.R - this function fits the model and makes predictions. We map over each held-out outer fold to produce 180 *test set* estimates of model performance.
 
 ```{r eval_outer_folds}
 # set up a temporary id number to track participants across fits
@@ -196,21 +196,22 @@ seed_splits <- 52592
 
 splits <- d |> 
   make_splits(cv_resample_type, cv_resample, cv_outer_resample,
-              cv_inner_resample, the_seed = seed_splits)
+              cv_inner_resample, the_seed = seed_splits,
+              strata = "y")
 
 # map function fit_predict_eval() across each row of configs_best
-all <- 1:nrow(configs_best) |> 
-  map(\(config_num) fit_predict_eval(config_num, splits, configs_best))  
+all <- 1:nrow(configs_best_grp) |> 
+  map(\(config_num) fit_predict_eval(config_num, splits, configs_best_grp))  
 
 metrics_out <- all |> 
   map(\(l) pluck(l, "metrics_out")) |> 
   list_rbind() |> 
-  write_rds("~/Desktop/dahne_lab/moodivate/outer_metrics.rds")
+  write_rds("~/Desktop/musc/dahne_lab/moodivate/outer_metrics.rds")
 
 preds_out <- all |> 
   map(\(l) pluck(l, "probs_out")) |> 
   list_rbind() |> 
-  write_rds("~/Desktop/dahne_lab/moodivate/outer_preds.rds")
+  write_rds("~/Desktop/musc/dahne_lab/moodivate/outer_preds.rds")
 
 
 ```
@@ -223,7 +224,7 @@ Best model configurations were selected using the median auROCs across 10 inner 
 
 ```{r}
 metrics_out |> 
-  group_by(feature_set) |> 
+  group_by(week, phq) |> 
   summarize(median(roc_auc_in), mean(roc_auc_in), 
             min(roc_auc_in), max(roc_auc_in), sd(roc_auc_in)) |> 
   glimpse()
@@ -236,253 +237,263 @@ Best model configurations were evaluated using the auROCs from the 90 (3x10 for 
 Outer overall
 ```{r metrics_out}
 metrics_out |> 
-  group_by(feature_set) |> 
-  summarize(median(roc_auc), mean(roc_auc),
-            min(roc_auc), max(roc_auc), sd(roc_auc)) |> 
-  glimpse()
+  group_by(phq, week) |> 
+  summarize(min = min(roc_auc), 
+            iqr25 = quantile(roc_auc, probs = 0.25),
+            median = median(roc_auc), 
+            iqr75 = quantile(roc_auc, probs = 0.75),
+            max = max(roc_auc)) 
 ```
 
 Side by side of inner & outer median AUCs
 ```{r}
 metrics_out |> 
-  group_by(feature_set) |> 
+  group_by(week, phq) |> 
   summarize(median(roc_auc), median(roc_auc_in),
-            mean(roc_auc), mean(roc_auc_in)) |> 
-  glimpse()
+            mean(roc_auc), mean(roc_auc_in))
 ```
 
 Plot outer fold auROCs
 ```{r plot_outer}
 metrics_out |> 
-  ggplot(aes(x = roc_auc,
-             fill = feature_set)) +
-  geom_histogram(bins = 10)  +
-  facet_wrap(vars(feature_set), ncol = 1)
+  ggplot(aes(x = roc_auc)) +
+  geom_histogram(bins = 10)  
 
 ```
 
-### ROC curves
+### Full Outer Metrics
 
-This is single auROC by concatenating all outer folds.
-Could consider reporting this auROC though likely average of outer fold auROCs is more appropriate (and/or Bayesian posterior probability distributions). 
+```{r}
+metrics_out |> 
+  group_by(phq, week) |> 
+  summarize(median(roc_auc),
+            median(sens),
+            median(spec),
+            median(ppv),
+            median(npv),
+            median(accuracy))
+```
 
-#### Models built from weeks 1 & 2 data
+
+## ROC curves
+
+Make configuration-specific preds_out datasets
+```{r}
+preds_out_eda2 <- preds_out |> 
+  filter(str_detect(feature_set, "_wk2") & !str_detect(feature_set, "phq"))
+
+preds_out_eda3 <- preds_out |> 
+  filter(str_detect(feature_set, "_wk3") & !str_detect(feature_set, "phq"))
+
+preds_out_eda4 <- preds_out |> 
+  filter(str_detect(feature_set, "_wk4") & !str_detect(feature_set, "phq"))
+
+preds_out_phq2 <- preds_out |> 
+  filter(str_detect(feature_set, "_wk2") & str_detect(feature_set, "phq"))
+
+preds_out_phq3 <- preds_out |> 
+  filter(str_detect(feature_set, "_wk3") & str_detect(feature_set, "phq"))
+
+preds_out_phq4 <- preds_out |> 
+  filter(str_detect(feature_set, "_wk4") & str_detect(feature_set, "phq"))
+```
+
 
 ```{r roc_info_12}
-preds_out %>%
-  filter(feature_set == "thru_wk2") |> 
-  roc_auc(prob_raw, truth = label)
-
-roc_data <- preds_out %>%
-  filter(feature_set == "thru_wk2") |> 
+# week 2, eda only
+roc_data_eda2 <- preds_out_eda2 |> 
   roc_curve(prob_raw, truth = label)
 
-roc_data %>%
+fig_roc_eda2 <- roc_data_eda2 %>%
   ggplot(aes(x = 1 - specificity, y = sensitivity, color = .threshold)) +
   geom_path(linewidth = 2) +
   geom_abline(lty = 3) +
   coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
-  labs(x = "False Positive Rate",
-       y = "True Positive Rate",
+  labs(x = "",
+       y = "",
        color = "Threshold") +
   scale_x_continuous(breaks = seq(0,1,.25),
                      labels = sprintf("%.2f", seq(1,0,-.25))) +
-  scale_color_gradient(low="blue", high="red") +
-  theme(axis.text = element_text(size = rel(1.50)),
-        axis.title = element_text(size = rel(1.75)))
-```
+  scale_color_gradient(low="blue", high="red",
+                       limits = c(0, 1)) 
 
-Add individual outer fold auROC curves for visualization.
-```{r}
-
-# rocs per fold
-roc_folds <- preds_out %>%
-  filter(feature_set == "thru_wk2") |> 
-  nest(.by = outer_split_num, .key = "preds") |> 
-  mutate(roc = map(preds, \(preds) roc_curve(preds, prob_raw, 
-                                             truth = label)))
-
-fig_roc_folds <- roc_data %>%  # plot region from full concatenated data 
-  ggplot(aes(x = 1 - specificity, y = sensitivity)) + 
-  geom_abline(lty = 3) +
-  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
-  labs(x = "False Positive Rate",
-       y = "True Positive Rate") +
-  scale_x_continuous(breaks = seq(0,1,.25),
-                     labels = sprintf("%.2f", seq(1,0,-.25))) +
-  theme(axis.text = element_text(size = rel(1.25)),
-        axis.title = element_text(size = rel(1.5)))
-
-for (i in 1:nrow(roc_folds)) {
-  fig_roc_folds <- fig_roc_folds +
-    geom_path(data = roc_folds$roc[[i]],
-              mapping = aes(x = 1 - specificity, y = sensitivity),
-              color = "gray")
-}
-
-#add full concatenated curve
-fig_roc_folds +
-  geom_path(data = roc_data,
-            mapping = aes(x = 1 - specificity, y = sensitivity, 
-                          color = .threshold),
-            linewidth = 2) +
-  scale_color_gradient(low="blue", high="red") +
-  labs(color = "Threshold",
-       x = "False Positive Rate")
-```
-
-#### Models built from weeks 1 - 3 data
-
-```{r roc_info_123}
-preds_out %>%
-  filter(feature_set == "thru_wk3") |> 
-  roc_auc(prob_raw, truth = label)
-
-roc_data <- preds_out %>%
-  filter(feature_set == "thru_wk3") |> 
+# week 2, eda & phq
+roc_data_phq2 <- preds_out_phq2 |> 
   roc_curve(prob_raw, truth = label)
 
-roc_data %>%
+fig_roc_phq2 <- roc_data_phq2 %>%
   ggplot(aes(x = 1 - specificity, y = sensitivity, color = .threshold)) +
   geom_path(linewidth = 2) +
   geom_abline(lty = 3) +
   coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
-  labs(x = "False Positive Rate",
-       y = "True Positive Rate",
+  labs(x = "",
+       y = "",
        color = "Threshold") +
   scale_x_continuous(breaks = seq(0,1,.25),
                      labels = sprintf("%.2f", seq(1,0,-.25))) +
-  scale_color_gradient(low="blue", high="red") +
-  theme(axis.text = element_text(size = rel(1.50)),
-        axis.title = element_text(size = rel(1.75)))
-```
+  scale_color_gradient(low="blue", high="red",
+                       limits = c(0, 1)) 
 
-Add individual outer fold auROC curves for visualization.
-```{r}
-
-# rocs per fold
-roc_folds <- preds_out %>%
-  filter(feature_set == "thru_wk3") |> 
-  nest(.by = outer_split_num, .key = "preds") |> 
-  mutate(roc = map(preds, \(preds) roc_curve(preds, prob_raw, 
-                                             truth = label)))
-
-fig_roc_folds <- roc_data %>%  # plot region from full concatenated data 
-  ggplot(aes(x = 1 - specificity, y = sensitivity)) + 
-  geom_abline(lty = 3) +
-  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
-  labs(x = "False Positive Rate",
-       y = "True Positive Rate") +
-  scale_x_continuous(breaks = seq(0,1,.25),
-                     labels = sprintf("%.2f", seq(1,0,-.25))) +
-  theme(axis.text = element_text(size = rel(1.25)),
-        axis.title = element_text(size = rel(1.5)))
-
-for (i in 1:nrow(roc_folds)) {
-  fig_roc_folds <- fig_roc_folds +
-    geom_path(data = roc_folds$roc[[i]],
-              mapping = aes(x = 1 - specificity, y = sensitivity),
-              color = "gray")
-}
-
-#add full concatenated curve
-fig_roc_folds +
-  geom_path(data = roc_data,
-            mapping = aes(x = 1 - specificity, y = sensitivity, 
-                          color = .threshold),
-            linewidth = 2) +
-  scale_color_gradient(low="blue", high="red") +
-  labs(color = "Threshold",
-       x = "False Positive Rate")
-```
-
-#### Models built from weeks 1 - 4 data
-
-```{r roc_info_1234}
-preds_out %>%
-  filter(feature_set == "thru_wk4") |> 
-  roc_auc(prob_raw, truth = label)
-
-roc_data <- preds_out %>%
-  filter(feature_set == "thru_wk4") |> 
+# week 3, eda only
+roc_data_eda3 <- preds_out_eda3 |> 
   roc_curve(prob_raw, truth = label)
 
-roc_data %>%
+fig_roc_eda3 <- roc_data_eda3 %>%
   ggplot(aes(x = 1 - specificity, y = sensitivity, color = .threshold)) +
   geom_path(linewidth = 2) +
   geom_abline(lty = 3) +
   coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
-  labs(x = "False Positive Rate",
-       y = "True Positive Rate",
+  labs(x = "",
+       y = "",
        color = "Threshold") +
   scale_x_continuous(breaks = seq(0,1,.25),
                      labels = sprintf("%.2f", seq(1,0,-.25))) +
-  scale_color_gradient(low="blue", high="red") +
-  theme(axis.text = element_text(size = rel(1.50)),
-        axis.title = element_text(size = rel(1.75)))
-```
+  scale_color_gradient(low="blue", high="red",
+                       limits = c(0, 1)) 
 
-Add individual outer fold auROC curves for visualization.
-```{r}
+# week 3, eda & phq
+roc_data_phq3 <- preds_out_phq3 |> 
+  roc_curve(prob_raw, truth = label)
 
-# rocs per fold
-roc_folds <- preds_out %>%
-  filter(feature_set == "thru_wk4") |> 
-  nest(.by = outer_split_num, .key = "preds") |> 
-  mutate(roc = map(preds, \(preds) roc_curve(preds, prob_raw, 
-                                             truth = label)))
-
-fig_roc_folds <- roc_data %>%  # plot region from full concatenated data 
-  ggplot(aes(x = 1 - specificity, y = sensitivity)) + 
+fig_roc_phq3 <- roc_data_phq3 %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity, color = .threshold)) +
+  geom_path(linewidth = 2) +
   geom_abline(lty = 3) +
   coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
-  labs(x = "False Positive Rate",
-       y = "True Positive Rate") +
+  labs(x = "",
+       y = "",
+       color = "Threshold") +
   scale_x_continuous(breaks = seq(0,1,.25),
                      labels = sprintf("%.2f", seq(1,0,-.25))) +
-  theme(axis.text = element_text(size = rel(1.25)),
-        axis.title = element_text(size = rel(1.5)))
+  scale_color_gradient(low="blue", high="red",
+                       limits = c(0, 1)) 
 
-for (i in 1:nrow(roc_folds)) {
-  fig_roc_folds <- fig_roc_folds +
-    geom_path(data = roc_folds$roc[[i]],
-              mapping = aes(x = 1 - specificity, y = sensitivity),
-              color = "gray")
-}
+# week 4, eda only
+roc_data_eda4 <- preds_out_eda4 |> 
+  roc_curve(prob_raw, truth = label)
 
-#add full concatenated curve
-fig_roc_folds +
-  geom_path(data = roc_data,
-            mapping = aes(x = 1 - specificity, y = sensitivity, 
-                          color = .threshold),
-            linewidth = 2) +
-  scale_color_gradient(low="blue", high="red") +
-  labs(color = "Threshold",
-       x = "False Positive Rate")
+fig_roc_eda4 <- roc_data_eda4 %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity, color = .threshold)) +
+  geom_path(linewidth = 2) +
+  geom_abline(lty = 3) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "",
+       y = "",
+       color = "Threshold") +
+  scale_x_continuous(breaks = seq(0,1,.25),
+                     labels = sprintf("%.2f", seq(1,0,-.25))) +
+  scale_color_gradient(low="blue", high="red",
+                       limits = c(0, 1)) 
+
+# week 4, eda & phq
+roc_data_phq4 <- preds_out_phq4 |> 
+  roc_curve(prob_raw, truth = label)
+
+fig_roc_phq4 <- roc_data_phq4 %>%
+  ggplot(aes(x = 1 - specificity, y = sensitivity, color = .threshold)) +
+  geom_path(linewidth = 2) +
+  geom_abline(lty = 3) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "",
+       y = "",
+       color = "Threshold") +
+  scale_x_continuous(breaks = seq(0,1,.25),
+                     labels = sprintf("%.2f", seq(1,0,-.25))) +
+  scale_color_gradient(low="blue", high="red",
+                       limits = c(0, 1)) 
 ```
 
-#### Probability Histograms
-Histograms with free Y. Remove `scales = "free_y"` for fixed y but doesnt make sense to do this with the class imbalance
-```{r prob_plot_free}
-preds_out %>% 
-  ggplot(data = ., aes(x = prob_raw)) + 
-   geom_histogram(bins = 100, fill = "white", col = "black") +
-   facet_wrap(~label, nrow = 2, scales = "free_y") +
-   xlab("Pr(Lapse)") +
-  theme(axis.text = element_text(size = rel(1.00)), 
-        axis.title.x = element_text(size = rel(1.25)),
-        strip.text = element_text(size = rel(1.75)))
+Combine into single figure
+```{r}
+library(patchwork)
+
+patchwork <- ( fig_roc_eda2 + fig_roc_phq2 ) /
+  ( fig_roc_eda3 + fig_roc_phq3 ) /
+  ( fig_roc_eda4 + fig_roc_phq4 )
+
+patchwork +
+  plot_layout(guides = "collect") 
 ```
 
+## Confusion matrices 
 
-#### Confusion matrices based on concatenated test folds
-
-Confusion matrix using .5 threshold
+### Confusion matrix using .5 threshold
 ```{r default_cm}
-(cm <- preds_out |> 
-   mutate(estimate = if_else(prob_raw > .5, "Non-Responder", "Responder"),
+# engagement-only, through W2
+(cm <- preds_out_eda2 |> 
+   mutate(estimate = if_else(prob_raw > .5, "non_responder", "responder"),
           estimate = factor(estimate, 
-                            levels = c("Non-Responder", "Responder"))) |> 
+                            levels = c("non_responder", "responder"))) |> 
+   conf_mat(truth = label, estimate = estimate))
+
+cm %>% 
+  autoplot() +
+  theme(axis.text = element_text(size = rel(1.50)), 
+        axis.title = element_text(size = rel(1.75)))
+
+cm %>% summary()
+
+# engagement-only, through W3
+(cm <- preds_out_eda3 |> 
+   mutate(estimate = if_else(prob_raw > .5, "non_responder", "responder"),
+          estimate = factor(estimate, 
+                            levels = c("non_responder", "responder"))) |> 
+   conf_mat(truth = label, estimate = estimate))
+
+cm %>% 
+  autoplot() +
+  theme(axis.text = element_text(size = rel(1.50)), 
+        axis.title = element_text(size = rel(1.75)))
+
+cm %>% summary()
+
+# engagement-only, through W4
+(cm <- preds_out_eda4 |> 
+   mutate(estimate = if_else(prob_raw > .5, "non_responder", "responder"),
+          estimate = factor(estimate, 
+                            levels = c("non_responder", "responder"))) |> 
+   conf_mat(truth = label, estimate = estimate))
+
+cm %>% 
+  autoplot() +
+  theme(axis.text = element_text(size = rel(1.50)), 
+        axis.title = element_text(size = rel(1.75)))
+
+cm %>% summary()
+
+# engagement + clinical, through W2
+(cm <- preds_out_phq2 |> 
+   mutate(estimate = if_else(prob_raw > .5, "non_responder", "responder"),
+          estimate = factor(estimate, 
+                            levels = c("non_responder", "responder"))) |> 
+   conf_mat(truth = label, estimate = estimate))
+
+cm %>% 
+  autoplot() +
+  theme(axis.text = element_text(size = rel(1.50)), 
+        axis.title = element_text(size = rel(1.75)))
+
+cm %>% summary()
+
+# engagement + clinical, through W3
+(cm <- preds_out_phq3 |> 
+   mutate(estimate = if_else(prob_raw > .5, "non_responder", "responder"),
+          estimate = factor(estimate, 
+                            levels = c("non_responder", "responder"))) |> 
+   conf_mat(truth = label, estimate = estimate))
+
+cm %>% 
+  autoplot() +
+  theme(axis.text = element_text(size = rel(1.50)), 
+        axis.title = element_text(size = rel(1.75)))
+
+cm %>% summary()
+
+# engagement + clinical, through W4
+(cm <- preds_out_phq4 |> 
+   mutate(estimate = if_else(prob_raw > .5, "non_responder", "responder"),
+          estimate = factor(estimate, 
+                            levels = c("non_responder", "responder"))) |> 
    conf_mat(truth = label, estimate = estimate))
 
 cm %>% 
@@ -494,25 +505,24 @@ cm %>% summary()
 
 ```
 
-
-Confusion matrix at optimal cut-point (based on Youdens J index)
+### Confusion matrix at optimal cut-point (based on Youdens J index)
 
 https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1444894/
 https://pubmed.ncbi.nlm.nih.gov/15405679/
 
 ```{r youden_cm}
-j_thres_roc <- roc_data |> 
+# engagement-only, through W2
+j_thres_roc <- roc_data_eda2 |> 
   mutate(j = sensitivity + specificity - 1) |> 
   slice_max(j) |> 
   print() |> 
   pull(.threshold)
 
-(cm <- preds_out |> 
-   mutate(estimate = if_else(prob_raw > j_thres_roc, 
-                             "Non-Responder", "Responder"),
-          estimate = factor(estimate, 
-                            levels = c("Non-Responder", "Responder"))) |> 
-   conf_mat(truth = label, estimate = estimate))
+(cm <- preds_out_eda2 |> 
+    mutate(estimate = if_else(prob_raw > j_thres_roc, "non_responder", "responder"),
+           estimate = factor(estimate, 
+                             levels = c("non_responder", "responder"))) |> 
+    conf_mat(truth = label, estimate = estimate))
 
 cm %>% 
   autoplot() +
@@ -520,4 +530,381 @@ cm %>%
         axis.title = element_text(size = rel(1.75)))
 
 cm %>% summary()
+
+# engagement-only, through W3
+j_thres_roc <- roc_data_eda3 |> 
+  mutate(j = sensitivity + specificity - 1) |> 
+  slice_max(j) |> 
+  print() |> 
+  pull(.threshold)
+
+(cm <- preds_out_eda3 |> 
+    mutate(estimate = if_else(prob_raw > j_thres_roc, "non_responder", "responder"),
+           estimate = factor(estimate, 
+                             levels = c("non_responder", "responder"))) |> 
+    conf_mat(truth = label, estimate = estimate))
+
+cm %>% 
+  autoplot() +
+  theme(axis.text = element_text(size = rel(1.50)), 
+        axis.title = element_text(size = rel(1.75)))
+
+cm %>% summary()
+
+# engagement-only, through W4
+j_thres_roc <- roc_data_eda4 |> 
+  mutate(j = sensitivity + specificity - 1) |> 
+  slice_max(j) |> 
+  print() |> 
+  pull(.threshold)
+
+(cm <- preds_out_eda4 |> 
+    mutate(estimate = if_else(prob_raw > j_thres_roc, "non_responder", "responder"),
+           estimate = factor(estimate, 
+                             levels = c("non_responder", "responder"))) |> 
+    conf_mat(truth = label, estimate = estimate))
+
+cm %>% 
+  autoplot() +
+  theme(axis.text = element_text(size = rel(1.50)), 
+        axis.title = element_text(size = rel(1.75)))
+
+cm %>% summary()
+
+# engagement+clinical, through W2
+j_thres_roc <- roc_data_phq2 |> 
+  mutate(j = sensitivity + specificity - 1) |> 
+  slice_max(j) |> 
+  print() |> 
+  pull(.threshold)
+
+(cm <- preds_out_phq2 |> 
+    mutate(estimate = if_else(prob_raw > j_thres_roc, "non_responder", "responder"),
+           estimate = factor(estimate, 
+                             levels = c("non_responder", "responder"))) |> 
+    conf_mat(truth = label, estimate = estimate))
+
+cm %>% 
+  autoplot() +
+  theme(axis.text = element_text(size = rel(1.50)), 
+        axis.title = element_text(size = rel(1.75)))
+
+cm %>% summary()
+
+# engagement+clinical, through W3
+j_thres_roc <- roc_data_phq3 |> 
+  mutate(j = sensitivity + specificity - 1) |> 
+  slice_max(j) |> 
+  print() |> 
+  pull(.threshold)
+
+(cm <- preds_out_phq3 |> 
+    mutate(estimate = if_else(prob_raw > j_thres_roc, "non_responder", "responder"),
+           estimate = factor(estimate, 
+                             levels = c("non_responder", "responder"))) |> 
+    conf_mat(truth = label, estimate = estimate))
+
+cm %>% 
+  autoplot() +
+  theme(axis.text = element_text(size = rel(1.50)), 
+        axis.title = element_text(size = rel(1.75)))
+
+cm %>% summary()
+
+# engagement+clinical, through W4
+j_thres_roc <- roc_data_phq4 |> 
+  mutate(j = sensitivity + specificity - 1) |> 
+  slice_max(j) |> 
+  print() |> 
+  pull(.threshold)
+
+(cm <- preds_out_phq4 |> 
+    mutate(estimate = if_else(prob_raw > j_thres_roc, "non_responder", "responder"),
+           estimate = factor(estimate, 
+                             levels = c("non_responder", "responder"))) |> 
+    conf_mat(truth = label, estimate = estimate))
+
+cm %>% 
+  autoplot() +
+  theme(axis.text = element_text(size = rel(1.50)), 
+        axis.title = element_text(size = rel(1.75)))
+
+cm %>% summary()
+```
+
+## Posterior probability for formal model comparisons
+
+Make context-specific tibbles
+```{r}
+auc_eda2 <- metrics_out |> 
+  filter(week == "wk2" & phq == "eda_only") |> 
+  arrange(outer_split_num) |> 
+  mutate(repeat_num = rep(str_c("repeat", 1:3), each = 10),
+         fold_num = rep(str_c("fold", 1:10),3)) |>   # assumes 3x10 fold
+  select(repeat_num, fold_num, roc_auc)
+
+auc_eda3 <- metrics_out |> 
+  filter(week == "wk3" & phq == "eda_only") |> 
+  arrange(outer_split_num) |> 
+  mutate(repeat_num = rep(str_c("repeat", 1:3), each = 10),
+         fold_num = rep(str_c("fold", 1:10),3)) |>   # assumes 3x10 fold
+  select(repeat_num, fold_num, roc_auc)
+
+auc_eda4 <- metrics_out |> 
+  filter(week == "wk4" & phq == "eda_only") |> 
+  arrange(outer_split_num) |> 
+  mutate(repeat_num = rep(str_c("repeat", 1:3), each = 10),
+         fold_num = rep(str_c("fold", 1:10),3)) |>   # assumes 3x10 fold
+  select(repeat_num, fold_num, roc_auc)
+
+auc_phq2 <- metrics_out |> 
+  filter(week == "wk2" & phq == "phq") |> 
+  arrange(outer_split_num) |> 
+  mutate(repeat_num = rep(str_c("repeat", 1:3), each = 10),
+         fold_num = rep(str_c("fold", 1:10),3)) |>   # assumes 3x10 fold
+  select(repeat_num, fold_num, roc_auc)
+
+auc_phq3 <- metrics_out |> 
+  filter(week == "wk3" & phq == "phq") |> 
+  arrange(outer_split_num) |> 
+  mutate(repeat_num = rep(str_c("repeat", 1:3), each = 10),
+         fold_num = rep(str_c("fold", 1:10),3)) |>   # assumes 3x10 fold
+  select(repeat_num, fold_num, roc_auc)
+
+auc_phq4 <- metrics_out |> 
+  filter(week == "wk4" & phq == "phq") |> 
+  arrange(outer_split_num) |> 
+  mutate(repeat_num = rep(str_c("repeat", 1:3), each = 10),
+         fold_num = rep(str_c("fold", 1:10),3)) |>   # assumes 3x10 fold
+  select(repeat_num, fold_num, roc_auc)
+```
+
+Combine
+```{r}
+auc <- auc_eda2 |> 
+  rename(eng_wk2 = roc_auc) |> 
+  mutate(eng_wk3 = auc_eda3$roc_auc,
+         eng_wk4 = auc_eda4$roc_auc,
+         phq_wk2 = auc_phq2$roc_auc,
+         phq_wk3 = auc_phq3$roc_auc,
+         phq_wk4 = auc_phq4$roc_auc) |> 
+  glimpse()
+```
+
+### Generate posterior probability distributions
+
+```{r bayes}
+# from ?perf_mod()
+# Repeated CV (id [k] = repeat, id2 [j] = fold within repeat)
+# with a common variance:  statistic ~ model + (model | id/id2)
+# NOTE: that id/id2 format follows stanarm/glmer formatting rather than tidyposterior recommendations
+set.seed(101)
+pp <- auc |> 
+  rename(id = repeat_num,
+         id2 = fold_num) |> 
+  perf_mod(formula = statistic ~ model + (1 | id/id2),
+           # prior_intercept = rstanarm::student_t(autoscale = TRUE),
+           # prior = rstanarm::student_t(autoscale = TRUE),
+           transform = tidyposterior::logit_trans,  # for skewed & bounded AUC
+           iter = 10000, chains = 4,  
+           adapt_delta = .999,
+           hetero_var = TRUE,
+           family = gaussian
+  )  
+```
+in order to compare performance across model contexts - used Bayesian model to calculate probabilities that average performance across models differ, and evaluated those. also include sentence "these are not p-values - we want them to be away from 0.5, closer to 1 - suggest increased performance for second feature set relative to the first"
+
+"We fit a Bayesian linear mixed-effects model using the collection of 180 estimated test set AUCs (6 feature sets X 10 folds X 3 repeats) to compare performance across feature sets. Specifically, from the model we are able to estimate the probability that 
+
+Prob (Average AUCi > Average AUCi') where i and i' index distinct feature sets (See Technical Supplement). 
+
+RESULTS: 
+We did this to evaluate the improvement in performance / value added with respect to classification performance... 
+```{r}
+rstanarm::prior_summary(pp$stan)
+```
+
+```{r}
+summary(pp$stan)
+```
+
+### Model posterier CIs
+
+```{r}
+pp_tidy <- pp |> 
+  tidy(seed = 123)
+
+q = c(.025, .5, .975)
+pp_tidy |> 
+  group_by(model) |> 
+  summarize(median = quantile(posterior, probs = q[2]),
+            lower = quantile(posterior, probs = q[1]), 
+            upper = quantile(posterior, probs = q[3])) |> 
+  mutate(model = factor(model, levels = c("eng_wk2", "eng_wk3", "eng_wk4",
+                                          "phq_wk2", "phq_wk3", "phq_wk4"),
+                        labels = c("Engagement Only (Week 2)", 
+                                   "Engagement Only (Week 3)", 
+                                   "Engagement Only (Week 4)",
+                                   "Engagement + Clinical (Week 2)",
+                                   "Engagement + Clinical (Week 3)",
+                                   "Engagement + Clinical (Week 4)")),
+         y = 1000) |> 
+  arrange(model)
+
+```
+
+
+### Model contrasts
+
+Compare within times by data type (e.g., engagement wk2 vs. eng + clinical wk2) and within data type by time (e.g., engagement wk2 vs. engagement wk3)
+
+Use median change in auROC & CIs from this table
+```{r}
+pp_contrasts <- contrast_models(pp,
+                                list("eng_wk3", "eng_wk4", "phq_wk2",
+                                     "eng_wk4", "phq_wk3", "phq_wk4",
+                                     "phq_wk3", "phq_wk4", "phq_wk4"),
+                                list("eng_wk2", "eng_wk2", "eng_wk2", 
+                                     "eng_wk3", "eng_wk3", "eng_wk4",
+                                     "phq_wk2", "phq_wk2", "phq_wk3"))
+summary(pp_contrasts, size = .01, prob = 0.95)
+pp_contrasts |> autoplot(size = .01)
+```
+
+Contrasts against 0 rather than using ROPE
+```{r}
+# engagement across time contrasts
+pp_contrasts |> 
+  filter(contrast == "eng_wk3 vs. eng_wk2") |> 
+  mutate(eng3_gt_eng2 = if_else(difference > 0, 1, 0)) |>
+  pull(eng3_gt_eng2) |> 
+  mean() # probability of 0.366 that wk3 > wk2
+
+pp_contrasts |> 
+  filter(contrast == "eng_wk4 vs. eng_wk2") |> 
+  mutate(eng4_gt_eng2 = if_else(difference > 0, 1, 0)) |>
+  pull(eng4_gt_eng2) |> 
+  mean() # probability of 0.326 that wk4 > wk2
+
+pp_contrasts |> 
+  filter(contrast == "eng_wk4 vs. eng_wk3") |> 
+  mutate(eng4_gt_eng3 = if_else(difference > 0, 1, 0)) |>
+  pull(eng4_gt_eng3) |> 
+  mean() # probability of 0.456 that wk4 > wk3
+
+# engagement + clinical across time contrasts
+pp_contrasts |> 
+  filter(contrast == "phq_wk3 vs. phq_wk2") |> 
+  mutate(phq3_gt_phq2 = if_else(difference > 0, 1, 0)) |>
+  pull(phq3_gt_phq2) |> 
+  mean() # probability of 0.362 that wk3 > wk2
+
+pp_contrasts |> 
+  filter(contrast == "phq_wk4 vs. phq_wk2") |> 
+  mutate(phq4_gt_phq2 = if_else(difference > 0, 1, 0)) |>
+  pull(phq4_gt_phq2) |> 
+  mean() # probability of 0.970 that wk4 > wk2
+
+pp_contrasts |> 
+  filter(contrast == "phq_wk4 vs. phq_wk3") |> 
+  mutate(phq4_gt_phq3 = if_else(difference > 0, 1, 0)) |>
+  pull(phq4_gt_phq3) |> 
+  mean() # probability of 0.992 that wk4 > wk3
+
+# addition of clinical data contrasts
+pp_contrasts |> 
+  filter(contrast == "phq_wk2 vs. eng_wk2") |> 
+  mutate(phq2_gt_eng2 = if_else(difference > 0, 1, 0)) |>
+  pull(phq2_gt_eng2) |> 
+  mean() # probability of 1.000 that adding clinical data improves performance
+
+pp_contrasts |> 
+  filter(contrast == "phq_wk3 vs. eng_wk3") |> 
+  mutate(phq3_gt_eng3 = if_else(difference > 0, 1, 0)) |>
+  pull(phq3_gt_eng3) |> 
+  mean() # probability of 1.000 that adding clinical data improves performance
+
+pp_contrasts |> 
+  filter(contrast == "phq_wk4 vs. eng_wk4") |> 
+  mutate(phq4_gt_eng4 = if_else(difference > 0, 1, 0)) |>
+  pull(phq4_gt_eng4) |> 
+  mean() # probability of 1.000 that adding clinical data improves performance
+
+
+```
+
+### Figure: Model posteriors & CIs
+
+```{r}
+
+pp_tidy_fig <- pp_tidy |> 
+  mutate(model = factor(model, 
+                        levels = c("eng_wk2", "eng_wk3", 
+                                   "eng_wk4", "phq_wk2", 
+                                   "phq_wk3", "phq_wk4"))) |> 
+  mutate(data_type = if_else(str_detect(model, "phq"), "Clinical Data Added",
+                             "Engagement Only"),
+         week = str_sub(model, start = -1L, end = -1L)) |> 
+  mutate(week = str_c("Week ", week),
+         data_type = fct_relevel(data_type, 
+                                 "Engagement Only", "Clinical Data Added"))
+
+ci <- pp_tidy_fig |> 
+  summary() |> 
+  mutate(model = factor(model, 
+                        levels = c("eng_wk2", "eng_wk3", 
+                                   "eng_wk4", "phq_wk2", 
+                                   "phq_wk3", "phq_wk4")),
+         y = 1000)  |> 
+  mutate(data_type = if_else(str_detect(model, "phq"), "Clinical Data Added",
+                             "Engagement Only"),
+         week = str_sub(model, start = -1L, end = -1L)) |> 
+  mutate(week = str_c("Week ", week),
+         data_type = fct_relevel(data_type, 
+                                 "Engagement Only", "Clinical Data Added"))
+
+theme_set(theme_classic())
+pp_tidy_fig |> 
+  ggplot() + 
+  geom_histogram(aes(x = posterior, fill = data_type), 
+                 color = "black", alpha = .4, 
+                 bins = 30) +
+  geom_segment(mapping = aes(y = y+250, yend = y+50, x = mean, xend = mean,
+                             color = data_type),
+               data = ci) +
+  geom_segment(mapping = aes(y = y+150, yend = y+150, x = lower, xend = upper, 
+                             color = data_type),
+               data = ci) +
+  facet_wrap(~week, ncol = 1) +
+  #facet_grid(rows = vars(week), cols = vars(data_type)) +
+  scale_y_continuous("Posterior Probability", breaks = c(0, 500, 1000)) +
+  # ylab("Posterior Probability Density") +
+  labs(x = "Area Under ROC Curve",
+       color = "Data Type",
+       fill = "Data Type") +
+  theme(legend.position = "bottom")
+
+# simplified figure for poster
+pp_tidy_fig |> 
+  ggplot() +
+  geom_point(mapping = aes(y = 10, x = mean,
+                           color = data_type),
+             size = 3,
+             data = ci) +
+  # geom_segment(mapping = aes(y = y+250, yend = y+50, x = mean, xend = mean,
+  #                            color = data_type),
+  #              data = ci) +
+  geom_segment(mapping = aes(y = 10, yend = 10, x = lower, xend = upper, 
+                             color = data_type),
+               data = ci) +
+  facet_wrap(~week, ncol = 1) +
+  #facet_grid(rows = vars(week), cols = vars(data_type)) +
+  scale_y_continuous(breaks = c(0, 500, 1000)) +
+  # ylab("Posterior Probability Density") +
+  labs(x = "Area Under ROC Curve",
+       y = "",
+       color = "Data Type",
+       title = "Performance Across Model Contexts") +
+  theme(legend.position = "bottom")
+
 ```
