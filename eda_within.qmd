@@ -2,6 +2,8 @@
 title: "EDA: Within-Subjects Feature Engineering"
 author: "Gaylen"
 format: html
+toc: true
+toc-depth: 4
 ---
 
 # Setup
@@ -16,9 +18,9 @@ library(labelled)
 ## Read in data
 
 ```{r}
-d <- read_csv("~/Desktop/dahne_lab/moodivate/data_clean.csv", 
+d <- read_csv("~/Desktop/musc/dahne_lab/moodivate/data_raw.csv", 
               show_col_types = FALSE) |> 
-  # class outcome variable into clearly labeled levels
+  # class BDI outcome variable into clearly labeled levels
   mutate(bdi_outcome = case_when(
     bdi_outcome == 0 ~ "NonResponder",
     bdi_outcome == 1 ~ "Responder",
@@ -28,46 +30,34 @@ d <- read_csv("~/Desktop/dahne_lab/moodivate/data_clean.csv",
          bdi_baseline = bdi_score_w0) |> 
   # remove BDI scores from other timepoints
   select(-starts_with("bdi_score"), -starts_with("bdi_change")) |> 
+  # class PHQ8 outcome variable into clearly labeled levels
+  mutate(phq_outcome_cat = if_else(phq8_change_bl_w12 > -5, 
+                                   "NonResponder", 
+                                   "Responder", 
+                                   NA_character_)) |> 
+  mutate(phq_outcome_cat = factor(phq_outcome_cat)) |> 
+  rename(phq_outcome_cont = phq8_change_bl_w12, phq_baseline = phq8_score_bl) |> 
+  # remove PHQ8 scores from other timepoints
+  select(-starts_with("phq8_score"), -starts_with("phq8_change")) |> 
   # remove complete_activity_* variables (decided not useful)
   select(-starts_with("complete_activity")) |> 
   # standardize naming
+  rename_with(~ str_replace(.x, "_wk", "_w")) |> 
   rename_with(~ str_replace(.x, "_w", "_wk")) |> 
-  relocate(bdi_baseline, bdi_outcome_cat, bdi_outcome_cont) |> 
-  filter(!is.na(bdi_outcome_cat)) |> 
+  relocate(record_id, 
+           bdi_baseline, bdi_outcome_cat, bdi_outcome_cont,
+           phq_baseline, phq_outcome_cat, phq_outcome_cont,
+           starts_with("session"), starts_with("total"),
+           starts_with("average"), starts_with("add_act"),
+           starts_with("schedule_"), starts_with("scheduled_"),
+           starts_with("completed_"), starts_with("add_g"),
+           starts_with("badges"), starts_with("phq8_comp"),
+           starts_with("mood")) |> 
+  filter(!is.na(bdi_outcome_cat)) |> # NAs overlap fully on both outcomes
   mutate(across(c(starts_with("total_time"), starts_with("average")),
                 ~ .x / 60)) |> 
   glimpse()
 ```
-
-Make scheduled/completed proportion variable
-```{r}
-# d <- d |> 
-#   mutate(prop_completed_activities_wk1 = completed_activities_wk1 /
-#            scheduled_activities_wk1,
-#          prop_completed_activities_wk2 = completed_activities_wk2 /
-#            scheduled_activities_wk2,
-#          prop_completed_activities_wk3 = completed_activities_wk3 /
-#            scheduled_activities_wk3,
-#          prop_completed_activities_wk4 = completed_activities_wk4 /
-#            scheduled_activities_wk4,
-#          prop_completed_activities_wk5 = completed_activities_wk5 /
-#            scheduled_activities_wk5,
-#          prop_completed_activities_wk6 = completed_activities_wk6 /
-#            scheduled_activities_wk6,
-#          prop_completed_activities_wk7 = completed_activities_wk7 /
-#            scheduled_activities_wk7,
-#          prop_completed_activities_wk8 = completed_activities_wk8 /
-#            scheduled_activities_wk8,
-#          prop_completed_activities_wk9 = completed_activities_wk9 /
-#            scheduled_activities_wk9,
-#          prop_completed_activities_wk10 = completed_activities_wk10 /
-#            scheduled_activities_wk10,
-#          prop_completed_activities_wk11 = completed_activities_wk11 /
-#            scheduled_activities_wk11,
-#          prop_completed_activities_wk12 = completed_activities_wk12 /
-#            scheduled_activities_wk12)
-```
-
 
 ### Make within-subjects features
 
@@ -89,37 +79,1083 @@ for (stem in stem_vars) {
   # 2) Change from average of all previous weeks
   d[str_c(stem, "_chg_from_avg_wk", 3:12)] <-
     map_dfc(3:12, function(week_num) {
-        prev_cols <- str_c(stem, "_wk", 1:(week_num - 1))
-        d[[str_c(stem, "_wk", week_num)]] -
-          rowMeans(d[prev_cols], na.rm = TRUE)
+      prev_cols <- str_c(stem, "_wk", 1:(week_num - 1))
+      d[[str_c(stem, "_wk", week_num)]] -
+        rowMeans(d[prev_cols], na.rm = TRUE)
     })
   
   # 3) Change from previous week
   d[str_c(stem, "_chg_from_prev_wk", 3:12)] <-
     map_dfc(3:12, function(week_num) {
-        prev_cols <- str_c(stem, "_wk", 1:(week_num - 1))
-        d[[str_c(stem, "_wk", week_num)]] -
-          d[[str_c(stem, "_wk", week_num - 1)]]
+      prev_cols <- str_c(stem, "_wk", 1:(week_num - 1))
+      d[[str_c(stem, "_wk", week_num)]] -
+        d[[str_c(stem, "_wk", week_num - 1)]]
     })
 }
 
 ```
 
-### Make BDI quartile variable (divide continuous into quartiles)
+Write out data including within subs variables
 
+Add phq8 interim data back in
 ```{r}
-d <- d |> 
-  mutate(bdi_outcome_quartile = case_when(
-    bdi_outcome_cont <= quantile(d$bdi_outcome_cont)[2] ~ "0-25%",
-    bdi_outcome_cont <= quantile(d$bdi_outcome_cont)[3] ~ "26-50%",
-    bdi_outcome_cont <= quantile(d$bdi_outcome_cont)[4] ~ "51-75%",
-    bdi_outcome_cont <= quantile(d$bdi_outcome_cont)[5] ~ "76-100%",
-    TRUE ~ NA_character_
-  )) |> 
-  relocate(starts_with("bdi_baseline"), starts_with("bdi_outcome"), everything())
+dphq <- read_csv("~/Desktop/musc/dahne_lab/moodivate/data_clean.csv", 
+              show_col_types = FALSE) |> 
+  select(record_id, starts_with("phq8_change")) |> 
+  filter(!is.na(phq8_change_bl_w12)) |> 
+  select(-phq8_change_bl_w12)
+  
 ```
 
-## Descriptives tables
+```{r}
+d |> 
+  left_join(dphq, by = "record_id") |> 
+  write_csv("~/Desktop/musc/dahne_lab/moodivate/data_within_clean.csv")
+
+rm(dphq)
+```
+
+
+
+## Descriptives tables: BDI
+
+### Make quartile variables (divide continuous into quartiles)
+
+<!-- BDI -->
+<!-- ```{r} -->
+<!-- d <- d |>  -->
+<!--   mutate(bdi_outcome_quartile = case_when( -->
+<!--     bdi_outcome_cont <= quantile(d$bdi_outcome_cont)[2] ~ "0-25%", -->
+<!--     bdi_outcome_cont <= quantile(d$bdi_outcome_cont)[3] ~ "26-50%", -->
+<!--     bdi_outcome_cont <= quantile(d$bdi_outcome_cont)[4] ~ "51-75%", -->
+<!--     bdi_outcome_cont <= quantile(d$bdi_outcome_cont)[5] ~ "76-100%", -->
+<!--     TRUE ~ NA_character_ -->
+<!--   )) |>  -->
+<!--   relocate(starts_with("bdi_baseline"), starts_with("bdi_outcome"), everything()) -->
+<!-- ``` -->
+
+<!-- Making one table per variable "stem" (e.g., session count) -->
+
+<!-- ### Session count -->
+
+<!-- ```{r} -->
+<!-- tbl_session_count <- d |> -->
+<!--   tbl_summary(by = bdi_outcome_quartile, -->
+<!--               include = c(contains(str_c(stem_vars[1], "_chg"))), -->
+<!--               digits = all_continuous() ~ 2 -->
+<!--   ) |> -->
+<!--   modify_header(label ~ "Predictor") |> -->
+<!--   modify_spanning_header(c("stat_1", "stat_2",  -->
+<!--                            "stat_3", "stat_4") ~ "BDI Quartile") |> -->
+<!--   add_p(pvalue_fun = label_style_pvalue(digits = 3)) -->
+
+<!-- tbl_session_count -->
+<!-- ``` -->
+
+<!-- ### Total time -->
+
+<!-- ```{r} -->
+<!-- tbl_total_time <- d |> -->
+<!--   tbl_summary(by = bdi_outcome_quartile, -->
+<!--               include = c(contains(str_c(stem_vars[2], "_chg"))), -->
+<!--               digits = all_continuous() ~ 2 -->
+<!--   ) |> -->
+<!--   modify_header(label ~ "Predictor") |> -->
+<!--   modify_spanning_header(c("stat_1", "stat_2",  -->
+<!--                            "stat_3", "stat_4") ~ "BDI Quartile") |> -->
+<!--   add_p(pvalue_fun = label_style_pvalue(digits = 3)) -->
+
+<!-- tbl_total_time -->
+<!-- ``` -->
+
+<!-- ### Average session time -->
+
+<!-- ```{r} -->
+<!-- tbl_avg_session <- d |> -->
+<!--   tbl_summary(by = bdi_outcome_quartile, -->
+<!--               include = c(contains(str_c(stem_vars[3], "_chg"))), -->
+<!--               digits = all_continuous() ~ 2 -->
+<!--   ) |> -->
+<!--   modify_header(label ~ "Predictor") |> -->
+<!--   modify_spanning_header(c("stat_1", "stat_2",  -->
+<!--                            "stat_3", "stat_4") ~ "BDI Quartile") |> -->
+<!--   add_p(pvalue_fun = label_style_pvalue(digits = 3)) -->
+
+<!-- tbl_avg_session -->
+<!-- ``` -->
+
+<!-- ### Add activity -->
+
+<!-- ```{r} -->
+<!-- tbl_add_activity <- d |> -->
+<!--   tbl_summary(by = bdi_outcome_quartile, -->
+<!--               include = c(contains(str_c(stem_vars[4], "_chg"))), -->
+<!--               digits = all_continuous() ~ 2 -->
+<!--   ) |> -->
+<!--   modify_header(label ~ "Predictor") |> -->
+<!--   modify_spanning_header(c("stat_1", "stat_2",  -->
+<!--                            "stat_3", "stat_4") ~ "BDI Quartile") |> -->
+<!--   add_p(pvalue_fun = label_style_pvalue(digits = 3)) -->
+
+<!-- tbl_add_activity -->
+<!-- ``` -->
+
+<!-- ### Schedule activity (use scheduling function) -->
+
+<!-- ```{r} -->
+<!-- tbl_schedule_act <- d |> -->
+<!--   tbl_summary(by = bdi_outcome_quartile, -->
+<!--               include = c(contains(str_c(stem_vars[5], "_chg"))), -->
+<!--               digits = all_continuous() ~ 2 -->
+<!--   ) |> -->
+<!--   modify_header(label ~ "Predictor") |> -->
+<!--   modify_spanning_header(c("stat_1", "stat_2",  -->
+<!--                            "stat_3", "stat_4") ~ "BDI Quartile") |> -->
+<!--   add_p(pvalue_fun = label_style_pvalue(digits = 3)) -->
+
+<!-- tbl_schedule_act -->
+<!-- ``` -->
+
+<!-- ### Scheduled activities (activities on that week's plan) -->
+
+<!-- ```{r} -->
+<!-- tbl_scheduled_acts <- d |> -->
+<!--   tbl_summary(by = bdi_outcome_quartile, -->
+<!--               include = c(contains(str_c(stem_vars[6], "_chg"))), -->
+<!--               digits = all_continuous() ~ 2 -->
+<!--   ) |> -->
+<!--   modify_header(label ~ "Predictor") |> -->
+<!--   modify_spanning_header(c("stat_1", "stat_2",  -->
+<!--                            "stat_3", "stat_4") ~ "BDI Quartile") |> -->
+<!--   add_p(pvalue_fun = label_style_pvalue(digits = 3)) -->
+
+<!-- tbl_scheduled_acts -->
+<!-- ``` -->
+
+<!-- ### Completed activities -->
+
+<!-- ```{r} -->
+<!-- tbl_completed_acts <- d |> -->
+<!--   tbl_summary(by = bdi_outcome_quartile, -->
+<!--               include = c(contains(str_c(stem_vars[7], "_chg"))), -->
+<!--               digits = all_continuous() ~ 2 -->
+<!--   ) |> -->
+<!--   modify_header(label ~ "Predictor") |> -->
+<!--   modify_spanning_header(c("stat_1", "stat_2",  -->
+<!--                            "stat_3", "stat_4") ~ "BDI Quartile") |> -->
+<!--   add_p(pvalue_fun = label_style_pvalue(digits = 3)) -->
+
+<!-- tbl_completed_acts -->
+<!-- ``` -->
+
+<!-- ### Add goal -->
+
+<!-- ```{r} -->
+<!-- tbl_add_goal <- d |> -->
+<!--   tbl_summary(by = bdi_outcome_quartile, -->
+<!--               include = c(contains(str_c(stem_vars[8], "_chg"))), -->
+<!--               digits = all_continuous() ~ 2 -->
+<!--   ) |> -->
+<!--   modify_header(label ~ "Predictor") |> -->
+<!--   modify_spanning_header(c("stat_1", "stat_2",  -->
+<!--                            "stat_3", "stat_4") ~ "BDI Quartile") |> -->
+<!--   add_p(pvalue_fun = label_style_pvalue(digits = 3)) -->
+
+<!-- tbl_add_goal -->
+<!-- ``` -->
+
+<!-- ### Badges earned -->
+
+<!-- ```{r} -->
+<!-- tbl_badges_earned <- d |> -->
+<!--   tbl_summary(by = bdi_outcome_quartile, -->
+<!--               include = c(contains(str_c(stem_vars[9], "_chg"))), -->
+<!--               digits = all_continuous() ~ 2 -->
+<!--   ) |> -->
+<!--   modify_header(label ~ "Predictor") |> -->
+<!--   modify_spanning_header(c("stat_1", "stat_2",  -->
+<!--                            "stat_3", "stat_4") ~ "BDI Quartile") |> -->
+<!--   add_p(pvalue_fun = label_style_pvalue(digits = 3)) -->
+
+<!-- tbl_badges_earned -->
+<!-- ``` -->
+
+<!-- ## Visualize continuous relationships: BDI -->
+
+<!-- ### Create long format dataframes -->
+
+<!-- Change from baseline (week 1) -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 <- d |>  -->
+<!--   select(contains("bdi"), contains("chg_wk1")) |>  -->
+<!--   pivot_longer(cols = contains("_wk"), -->
+<!--                names_to = c(".value", "week"), -->
+<!--                names_pattern = "(.*)_chg_wk1_wk(.*)") |>  -->
+<!--   mutate(week = factor(as.numeric(week), -->
+<!--                        levels = c(2:12), -->
+<!--                        labels = str_c("Week ", 2:12))) |>  -->
+<!--   glimpse() -->
+<!-- ``` -->
+
+<!-- Change from average of previous weeks -->
+<!-- ```{r} -->
+<!-- d_long_chg_avg <- d |>  -->
+<!--   select(contains("bdi"), contains("chg_from_avg")) |>  -->
+<!--   pivot_longer(cols = contains("_wk"), -->
+<!--                names_to = c(".value", "week"), -->
+<!--                names_pattern = "(.*)_chg_from_avg_wk(.*)") |>  -->
+<!--   mutate(week = factor(as.numeric(week), -->
+<!--                        levels = c(3:12), -->
+<!--                        labels = str_c("Week ", 3:12))) |>  -->
+<!--   glimpse() -->
+<!-- ``` -->
+
+<!-- Change from average of previous weeks -->
+<!-- ```{r} -->
+<!-- d_long_chg_prev <- d |>  -->
+<!--   select(contains("bdi"), contains("chg_from_prev")) |>  -->
+<!--   pivot_longer(cols = contains("_wk"), -->
+<!--                names_to = c(".value", "week"), -->
+<!--                names_pattern = "(.*)_chg_from_prev_wk(.*)") |>  -->
+<!--   mutate(week = factor(as.numeric(week), -->
+<!--                        levels = c(3:12), -->
+<!--                        labels = str_c("Week ", 3:12))) |>  -->
+<!--   glimpse() -->
+<!-- ``` -->
+
+<!-- ### Plots over time grouped by outcome quartile -->
+
+<!-- #### Session count -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = week, y = session_count,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Baseline", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Session Count (Change from Baseline)") -->
+
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = week, y = session_count,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Previous", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Session Count (Change from Previous Week)") -->
+
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = week, y = session_count,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Average", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Session Count (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Total time -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = week, y = total_time,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Baseline", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Total Time (Change from Baseline)") -->
+
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = week, y = total_time,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Previous", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Total Time (Change from Previous Week)") -->
+
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = week, y = total_time,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Average", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Total Time (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Average session time -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = week, y = average_session_time,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Baseline", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Average Session Time (Change from Baseline)") -->
+
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = week, y = average_session_time,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Previous", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Average Session Time (Change from Previous Week)") -->
+
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = week, y = average_session_time,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Average", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Average Session Time (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Add activities -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = week, y = add_activity,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Baseline", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Activities Added (Change from Baseline)") -->
+
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = week, y = add_activity,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Previous", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Activities Added (Change from Previous Week)") -->
+
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = week, y = add_activity,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Average", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Activities Added (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Schedule activity (use scheduling function) -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = week, y = schedule_activity,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Baseline", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Use Scheduling Function (Change from Baseline)") -->
+
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = week, y = schedule_activity,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Previous", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Use Scheduling Function (Change from Previous Week)") -->
+
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = week, y = schedule_activity,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Average", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Use Scheduling Function (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Scheduled activities (number of activities on that week's calendar) -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = week, y = scheduled_activities,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Baseline", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Number of Activities Scheduled (Change from Baseline)") -->
+
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = week, y = scheduled_activities,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Previous", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Number of Activities Scheduled (Change from Previous Week)") -->
+
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = week, y = scheduled_activities,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Average", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Number of Activities Scheduled (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Completed activities -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = week, y = completed_activities,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Baseline", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Number of Completed Activities (Change from Baseline)") -->
+
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = week, y = completed_activities,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Previous", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Number of Completed Activities (Change from Previous Week)") -->
+
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = week, y = completed_activities,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Average", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Number of Completed Activities (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Add goal -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = week, y = add_goal,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Baseline", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Number of Goals Added (Change from Baseline)") -->
+
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = week, y = add_goal,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Previous", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Number of Goals Added (Change from Previous Week)") -->
+
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = week, y = add_goal,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Average", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Number of Goals Added (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Badges earned -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = week, y = badges_earned,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Baseline", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Badges Earned (Change from Baseline)") -->
+
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = week, y = badges_earned,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Previous", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Badges Earned (Change from Previous Week)") -->
+
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = week, y = badges_earned,  -->
+<!--              colour = bdi_outcome_quartile, -->
+<!--              fill = bdi_outcome_quartile,  -->
+<!--              group = bdi_outcome_quartile)) + -->
+<!--   geom_point(position = position_dodge(width = 0.5), -->
+<!--              alpha = 0.25, shape = 5) + -->
+<!--   stat_summary(fun = mean, geom = "point",  -->
+<!--                size = 3, alpha = 0.7) + -->
+<!--   geom_smooth() + -->
+<!--   labs(x = "Week", -->
+<!--        y = "Change from Average", -->
+<!--        fill = "BDI (Quartiles)", -->
+<!--        color = "BDI (Quartiles)", -->
+<!--        group = "BDI (Quartiles)", -->
+<!--        title = "Badges Earned (Change from Average)") -->
+<!-- ``` -->
+
+<!-- ### Relationships with continuous outcome -->
+
+<!-- #### Session count -->
+
+<!-- Change from baseline -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = session_count, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.3, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Baseline", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Session Count (Change from Baseline)") -->
+<!-- ``` -->
+
+<!-- Change from previous week -->
+<!-- ```{r} -->
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = session_count, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Previous", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Session Count (Change from Previous)") -->
+<!-- ``` -->
+
+<!-- Change from average -->
+<!-- ```{r} -->
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = session_count, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Average", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Session Count (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Total time -->
+
+<!-- Change from baseline -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = total_time, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.3, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Baseline", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Total time (Change from Baseline)") -->
+<!-- ``` -->
+
+<!-- Change from previous week -->
+<!-- ```{r} -->
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = total_time, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Previous", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Total time (Change from Previous)") -->
+<!-- ``` -->
+
+<!-- Change from average -->
+<!-- ```{r} -->
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = total_time, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Average", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Total time (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Average session time -->
+
+<!-- Change from baseline -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = average_session_time, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.3, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Baseline", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Average session time (Change from Baseline)") -->
+<!-- ``` -->
+
+<!-- Change from previous week -->
+<!-- ```{r} -->
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = average_session_time, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Previous", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Average session time (Change from Previous)") -->
+<!-- ``` -->
+
+<!-- Change from average -->
+<!-- ```{r} -->
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = average_session_time, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Average", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Average session time (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Number of activities added -->
+
+<!-- Change from baseline -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = add_activity, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.3, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Baseline", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of activities added (Change from Baseline)") -->
+<!-- ``` -->
+
+<!-- Change from previous week -->
+<!-- ```{r} -->
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = add_activity, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Previous", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of activities added (Change from Previous)") -->
+<!-- ``` -->
+
+<!-- Change from average -->
+<!-- ```{r} -->
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = add_activity, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Average", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of activities added (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Uses scheduling function -->
+
+<!-- Change from baseline -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = schedule_activity, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.3, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Baseline", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Uses scheduling function (Change from Baseline)") -->
+<!-- ``` -->
+
+<!-- Change from previous week -->
+<!-- ```{r} -->
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = schedule_activity, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Previous", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Uses scheduling function (Change from Previous)") -->
+<!-- ``` -->
+
+<!-- Change from average -->
+<!-- ```{r} -->
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = schedule_activity, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Average", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Uses scheduling function (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Number of activities scheduled -->
+
+<!-- Change from baseline -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = scheduled_activities, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.3, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Baseline", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of activities scheduled (Change from Baseline)") -->
+<!-- ``` -->
+
+<!-- Change from previous week -->
+<!-- ```{r} -->
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = scheduled_activities, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Previous", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of activities scheduled (Change from Previous)") -->
+<!-- ``` -->
+
+<!-- Change from average -->
+<!-- ```{r} -->
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = scheduled_activities, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Average", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of activities scheduled (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Number of activities completed -->
+
+<!-- Change from baseline -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = completed_activities, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.3, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Baseline", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of activities completed (Change from Baseline)") -->
+<!-- ``` -->
+
+<!-- Change from previous week -->
+<!-- ```{r} -->
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = completed_activities, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Previous", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of activities completed (Change from Previous)") -->
+<!-- ``` -->
+
+<!-- Change from average -->
+<!-- ```{r} -->
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = completed_activities, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Average", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of activities completed (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Number of goals added -->
+
+<!-- Change from baseline -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = add_goal, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.3, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Baseline", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of goals added (Change from Baseline)") -->
+<!-- ``` -->
+
+<!-- Change from previous week -->
+<!-- ```{r} -->
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = add_goal, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Previous", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of goals added (Change from Previous)") -->
+<!-- ``` -->
+
+<!-- Change from average -->
+<!-- ```{r} -->
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = add_goal, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Average", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Number of goals added (Change from Average)") -->
+<!-- ``` -->
+
+<!-- #### Badges earned -->
+
+<!-- Change from baseline -->
+<!-- ```{r} -->
+<!-- d_long_chg_wk1 |>  -->
+<!--   ggplot(aes(x = badges_earned, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.3, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Baseline", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Badges earned (Change from Baseline)") -->
+<!-- ``` -->
+
+<!-- Change from previous week -->
+<!-- ```{r} -->
+<!-- d_long_chg_prev |>  -->
+<!--   ggplot(aes(x = badges_earned, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Previous", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Badges earned (Change from Previous)") -->
+<!-- ``` -->
+
+<!-- Change from average -->
+<!-- ```{r} -->
+<!-- d_long_chg_avg |>  -->
+<!--   ggplot(aes(x = badges_earned, y = bdi_outcome_cont)) + -->
+<!--   geom_point(alpha = 0.1, shape = 5) + -->
+<!--   geom_smooth() + -->
+<!--   facet_wrap(vars(week), nrow = 4, scales = "free") + -->
+<!--   labs(x = "Change from Average", -->
+<!--        y = "BDI (Continuous)", -->
+<!--        title = "Badges earned (Change from Average)") -->
+<!-- ``` -->
+
+## Descriptives tables: PHQ
 
 Making one table per variable "stem" (e.g., session count)
 
@@ -127,13 +1163,12 @@ Making one table per variable "stem" (e.g., session count)
 
 ```{r}
 tbl_session_count <- d |>
-  tbl_summary(by = bdi_outcome_quartile,
+  tbl_summary(by = phq_outcome_cat,
               include = c(contains(str_c(stem_vars[1], "_chg"))),
               digits = all_continuous() ~ 2
   ) |>
   modify_header(label ~ "Predictor") |>
-  modify_spanning_header(c("stat_1", "stat_2", 
-                           "stat_3", "stat_4") ~ "BDI Quartile") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
   add_p(pvalue_fun = label_style_pvalue(digits = 3))
 
 tbl_session_count
@@ -143,13 +1178,12 @@ tbl_session_count
 
 ```{r}
 tbl_total_time <- d |>
-  tbl_summary(by = bdi_outcome_quartile,
+  tbl_summary(by = phq_outcome_cat,
               include = c(contains(str_c(stem_vars[2], "_chg"))),
               digits = all_continuous() ~ 2
   ) |>
   modify_header(label ~ "Predictor") |>
-  modify_spanning_header(c("stat_1", "stat_2", 
-                           "stat_3", "stat_4") ~ "BDI Quartile") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
   add_p(pvalue_fun = label_style_pvalue(digits = 3))
 
 tbl_total_time
@@ -159,13 +1193,12 @@ tbl_total_time
 
 ```{r}
 tbl_avg_session <- d |>
-  tbl_summary(by = bdi_outcome_quartile,
+  tbl_summary(by = phq_outcome_cat,
               include = c(contains(str_c(stem_vars[3], "_chg"))),
               digits = all_continuous() ~ 2
   ) |>
   modify_header(label ~ "Predictor") |>
-  modify_spanning_header(c("stat_1", "stat_2", 
-                           "stat_3", "stat_4") ~ "BDI Quartile") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
   add_p(pvalue_fun = label_style_pvalue(digits = 3))
 
 tbl_avg_session
@@ -175,13 +1208,12 @@ tbl_avg_session
 
 ```{r}
 tbl_add_activity <- d |>
-  tbl_summary(by = bdi_outcome_quartile,
+  tbl_summary(by = phq_outcome_cat,
               include = c(contains(str_c(stem_vars[4], "_chg"))),
               digits = all_continuous() ~ 2
   ) |>
   modify_header(label ~ "Predictor") |>
-  modify_spanning_header(c("stat_1", "stat_2", 
-                           "stat_3", "stat_4") ~ "BDI Quartile") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
   add_p(pvalue_fun = label_style_pvalue(digits = 3))
 
 tbl_add_activity
@@ -191,13 +1223,12 @@ tbl_add_activity
 
 ```{r}
 tbl_schedule_act <- d |>
-  tbl_summary(by = bdi_outcome_quartile,
+  tbl_summary(by = phq_outcome_cat,
               include = c(contains(str_c(stem_vars[5], "_chg"))),
               digits = all_continuous() ~ 2
   ) |>
   modify_header(label ~ "Predictor") |>
-  modify_spanning_header(c("stat_1", "stat_2", 
-                           "stat_3", "stat_4") ~ "BDI Quartile") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
   add_p(pvalue_fun = label_style_pvalue(digits = 3))
 
 tbl_schedule_act
@@ -207,13 +1238,12 @@ tbl_schedule_act
 
 ```{r}
 tbl_scheduled_acts <- d |>
-  tbl_summary(by = bdi_outcome_quartile,
+  tbl_summary(by = phq_outcome_cat,
               include = c(contains(str_c(stem_vars[6], "_chg"))),
               digits = all_continuous() ~ 2
   ) |>
   modify_header(label ~ "Predictor") |>
-  modify_spanning_header(c("stat_1", "stat_2", 
-                           "stat_3", "stat_4") ~ "BDI Quartile") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
   add_p(pvalue_fun = label_style_pvalue(digits = 3))
 
 tbl_scheduled_acts
@@ -223,13 +1253,12 @@ tbl_scheduled_acts
 
 ```{r}
 tbl_completed_acts <- d |>
-  tbl_summary(by = bdi_outcome_quartile,
+  tbl_summary(by = phq_outcome_cat,
               include = c(contains(str_c(stem_vars[7], "_chg"))),
               digits = all_continuous() ~ 2
   ) |>
   modify_header(label ~ "Predictor") |>
-  modify_spanning_header(c("stat_1", "stat_2", 
-                           "stat_3", "stat_4") ~ "BDI Quartile") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
   add_p(pvalue_fun = label_style_pvalue(digits = 3))
 
 tbl_completed_acts
@@ -239,13 +1268,12 @@ tbl_completed_acts
 
 ```{r}
 tbl_add_goal <- d |>
-  tbl_summary(by = bdi_outcome_quartile,
+  tbl_summary(by = phq_outcome_cat,
               include = c(contains(str_c(stem_vars[8], "_chg"))),
               digits = all_continuous() ~ 2
   ) |>
   modify_header(label ~ "Predictor") |>
-  modify_spanning_header(c("stat_1", "stat_2", 
-                           "stat_3", "stat_4") ~ "BDI Quartile") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
   add_p(pvalue_fun = label_style_pvalue(digits = 3))
 
 tbl_add_goal
@@ -255,889 +1283,47 @@ tbl_add_goal
 
 ```{r}
 tbl_badges_earned <- d |>
-  tbl_summary(by = bdi_outcome_quartile,
+  tbl_summary(by = phq_outcome_cat,
               include = c(contains(str_c(stem_vars[9], "_chg"))),
               digits = all_continuous() ~ 2
   ) |>
   modify_header(label ~ "Predictor") |>
-  modify_spanning_header(c("stat_1", "stat_2", 
-                           "stat_3", "stat_4") ~ "BDI Quartile") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
   add_p(pvalue_fun = label_style_pvalue(digits = 3))
 
 tbl_badges_earned
 ```
 
-## Visualize continuous relationships
+### PHQ8 completion
 
-### Create long format dataframes
-
-Change from baseline (week 1)
 ```{r}
-d_long_chg_wk1 <- d |> 
-  select(contains("bdi"), contains("chg_wk1")) |> 
-  pivot_longer(cols = contains("_wk"),
-               names_to = c(".value", "week"),
-               names_pattern = "(.*)_chg_wk1_wk(.*)") |> 
-  mutate(week = factor(as.numeric(week),
-                       levels = c(2:12),
-                       labels = str_c("Week ", 2:12))) |> 
-  glimpse()
+tbl_phq8_comp <- d |>
+  tbl_summary(by = phq_outcome_cat,
+              include = c(contains(str_c(stem_vars[10], "_chg"))),
+              digits = all_continuous() ~ 2
+  ) |>
+  modify_header(label ~ "Predictor") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
+  add_p(pvalue_fun = label_style_pvalue(digits = 3))
+
+tbl_phq8_comp
 ```
 
-Change from average of previous weeks
+### Mood days
+
 ```{r}
-d_long_chg_avg <- d |> 
-  select(contains("bdi"), contains("chg_from_avg")) |> 
-  pivot_longer(cols = contains("_wk"),
-               names_to = c(".value", "week"),
-               names_pattern = "(.*)_chg_from_avg_wk(.*)") |> 
-  mutate(week = factor(as.numeric(week),
-                       levels = c(3:12),
-                       labels = str_c("Week ", 3:12))) |> 
-  glimpse()
-```
-
-Change from average of previous weeks
-```{r}
-d_long_chg_prev <- d |> 
-  select(contains("bdi"), contains("chg_from_prev")) |> 
-  pivot_longer(cols = contains("_wk"),
-               names_to = c(".value", "week"),
-               names_pattern = "(.*)_chg_from_prev_wk(.*)") |> 
-  mutate(week = factor(as.numeric(week),
-                       levels = c(3:12),
-                       labels = str_c("Week ", 3:12))) |> 
-  glimpse()
-```
-
-### Plots over time grouped by outcome quartile
-
-#### Session count
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = week, y = session_count, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Baseline",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Session Count (Change from Baseline)")
-
-d_long_chg_prev |> 
-  ggplot(aes(x = week, y = session_count, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Previous",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Session Count (Change from Previous Week)")
-
-d_long_chg_avg |> 
-  ggplot(aes(x = week, y = session_count, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Average",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Session Count (Change from Average)")
-```
-
-#### Total time
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = week, y = total_time, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Baseline",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Total Time (Change from Baseline)")
-
-d_long_chg_prev |> 
-  ggplot(aes(x = week, y = total_time, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Previous",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Total Time (Change from Previous Week)")
-
-d_long_chg_avg |> 
-  ggplot(aes(x = week, y = total_time, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Average",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Total Time (Change from Average)")
-```
-
-#### Average session time
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = week, y = average_session_time, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Baseline",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Average Session Time (Change from Baseline)")
-
-d_long_chg_prev |> 
-  ggplot(aes(x = week, y = average_session_time, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Previous",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Average Session Time (Change from Previous Week)")
-
-d_long_chg_avg |> 
-  ggplot(aes(x = week, y = average_session_time, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Average",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Average Session Time (Change from Average)")
-```
-
-#### Add activities
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = week, y = add_activity, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Baseline",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Activities Added (Change from Baseline)")
-
-d_long_chg_prev |> 
-  ggplot(aes(x = week, y = add_activity, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Previous",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Activities Added (Change from Previous Week)")
-
-d_long_chg_avg |> 
-  ggplot(aes(x = week, y = add_activity, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Average",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Activities Added (Change from Average)")
-```
-
-#### Schedule activity (use scheduling function)
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = week, y = schedule_activity, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Baseline",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Use Scheduling Function (Change from Baseline)")
-
-d_long_chg_prev |> 
-  ggplot(aes(x = week, y = schedule_activity, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Previous",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Use Scheduling Function (Change from Previous Week)")
-
-d_long_chg_avg |> 
-  ggplot(aes(x = week, y = schedule_activity, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Average",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Use Scheduling Function (Change from Average)")
-```
-
-#### Scheduled activities (number of activities on that week's calendar)
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = week, y = scheduled_activities, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Baseline",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Number of Activities Scheduled (Change from Baseline)")
-
-d_long_chg_prev |> 
-  ggplot(aes(x = week, y = scheduled_activities, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Previous",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Number of Activities Scheduled (Change from Previous Week)")
-
-d_long_chg_avg |> 
-  ggplot(aes(x = week, y = scheduled_activities, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Average",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Number of Activities Scheduled (Change from Average)")
-```
-
-#### Completed activities
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = week, y = completed_activities, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Baseline",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Number of Completed Activities (Change from Baseline)")
-
-d_long_chg_prev |> 
-  ggplot(aes(x = week, y = completed_activities, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Previous",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Number of Completed Activities (Change from Previous Week)")
-
-d_long_chg_avg |> 
-  ggplot(aes(x = week, y = completed_activities, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Average",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Number of Completed Activities (Change from Average)")
-```
-
-#### Add goal
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = week, y = add_goal, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Baseline",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Number of Goals Added (Change from Baseline)")
-
-d_long_chg_prev |> 
-  ggplot(aes(x = week, y = add_goal, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Previous",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Number of Goals Added (Change from Previous Week)")
-
-d_long_chg_avg |> 
-  ggplot(aes(x = week, y = add_goal, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Average",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Number of Goals Added (Change from Average)")
-```
-
-#### Badges earned
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = week, y = badges_earned, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Baseline",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Badges Earned (Change from Baseline)")
-
-d_long_chg_prev |> 
-  ggplot(aes(x = week, y = badges_earned, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Previous",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Badges Earned (Change from Previous Week)")
-
-d_long_chg_avg |> 
-  ggplot(aes(x = week, y = badges_earned, 
-             colour = bdi_outcome_quartile,
-             fill = bdi_outcome_quartile, 
-             group = bdi_outcome_quartile)) +
-  geom_point(position = position_dodge(width = 0.5),
-             alpha = 0.25, shape = 5) +
-  stat_summary(fun = mean, geom = "point", 
-               size = 3, alpha = 0.7) +
-  geom_smooth() +
-  labs(x = "Week",
-       y = "Change from Average",
-       fill = "BDI (Quartiles)",
-       color = "BDI (Quartiles)",
-       group = "BDI (Quartiles)",
-       title = "Badges Earned (Change from Average)")
-```
-
-### Relationships with continuous outcome
-
-#### Session count
-
-Change from baseline
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = session_count, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.3, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Baseline",
-       y = "BDI (Continuous)",
-       title = "Session Count (Change from Baseline)")
-```
-
-Change from previous week
-```{r}
-d_long_chg_prev |> 
-  ggplot(aes(x = session_count, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Previous",
-       y = "BDI (Continuous)",
-       title = "Session Count (Change from Previous)")
-```
-
-Change from average
-```{r}
-d_long_chg_avg |> 
-  ggplot(aes(x = session_count, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Average",
-       y = "BDI (Continuous)",
-       title = "Session Count (Change from Average)")
-```
-
-#### Total time
-
-Change from baseline
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = total_time, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.3, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Baseline",
-       y = "BDI (Continuous)",
-       title = "Total time (Change from Baseline)")
-```
-
-Change from previous week
-```{r}
-d_long_chg_prev |> 
-  ggplot(aes(x = total_time, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Previous",
-       y = "BDI (Continuous)",
-       title = "Total time (Change from Previous)")
-```
-
-Change from average
-```{r}
-d_long_chg_avg |> 
-  ggplot(aes(x = total_time, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Average",
-       y = "BDI (Continuous)",
-       title = "Total time (Change from Average)")
-```
-
-#### Average session time
-
-Change from baseline
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = average_session_time, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.3, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Baseline",
-       y = "BDI (Continuous)",
-       title = "Average session time (Change from Baseline)")
-```
-
-Change from previous week
-```{r}
-d_long_chg_prev |> 
-  ggplot(aes(x = average_session_time, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Previous",
-       y = "BDI (Continuous)",
-       title = "Average session time (Change from Previous)")
-```
-
-Change from average
-```{r}
-d_long_chg_avg |> 
-  ggplot(aes(x = average_session_time, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Average",
-       y = "BDI (Continuous)",
-       title = "Average session time (Change from Average)")
-```
-
-#### Number of activities added
-
-Change from baseline
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = add_activity, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.3, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Baseline",
-       y = "BDI (Continuous)",
-       title = "Number of activities added (Change from Baseline)")
-```
-
-Change from previous week
-```{r}
-d_long_chg_prev |> 
-  ggplot(aes(x = add_activity, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Previous",
-       y = "BDI (Continuous)",
-       title = "Number of activities added (Change from Previous)")
-```
-
-Change from average
-```{r}
-d_long_chg_avg |> 
-  ggplot(aes(x = add_activity, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Average",
-       y = "BDI (Continuous)",
-       title = "Number of activities added (Change from Average)")
-```
-
-#### Uses scheduling function
-
-Change from baseline
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = schedule_activity, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.3, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Baseline",
-       y = "BDI (Continuous)",
-       title = "Uses scheduling function (Change from Baseline)")
-```
-
-Change from previous week
-```{r}
-d_long_chg_prev |> 
-  ggplot(aes(x = schedule_activity, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Previous",
-       y = "BDI (Continuous)",
-       title = "Uses scheduling function (Change from Previous)")
-```
-
-Change from average
-```{r}
-d_long_chg_avg |> 
-  ggplot(aes(x = schedule_activity, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Average",
-       y = "BDI (Continuous)",
-       title = "Uses scheduling function (Change from Average)")
-```
-
-#### Number of activities scheduled
-
-Change from baseline
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = scheduled_activities, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.3, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Baseline",
-       y = "BDI (Continuous)",
-       title = "Number of activities scheduled (Change from Baseline)")
-```
-
-Change from previous week
-```{r}
-d_long_chg_prev |> 
-  ggplot(aes(x = scheduled_activities, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Previous",
-       y = "BDI (Continuous)",
-       title = "Number of activities scheduled (Change from Previous)")
-```
-
-Change from average
-```{r}
-d_long_chg_avg |> 
-  ggplot(aes(x = scheduled_activities, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Average",
-       y = "BDI (Continuous)",
-       title = "Number of activities scheduled (Change from Average)")
-```
-
-#### Number of activities completed
-
-Change from baseline
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = completed_activities, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.3, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Baseline",
-       y = "BDI (Continuous)",
-       title = "Number of activities completed (Change from Baseline)")
-```
-
-Change from previous week
-```{r}
-d_long_chg_prev |> 
-  ggplot(aes(x = completed_activities, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Previous",
-       y = "BDI (Continuous)",
-       title = "Number of activities completed (Change from Previous)")
-```
-
-Change from average
-```{r}
-d_long_chg_avg |> 
-  ggplot(aes(x = completed_activities, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Average",
-       y = "BDI (Continuous)",
-       title = "Number of activities completed (Change from Average)")
-```
-
-#### Number of goals added
-
-Change from baseline
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = add_goal, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.3, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Baseline",
-       y = "BDI (Continuous)",
-       title = "Number of goals added (Change from Baseline)")
-```
-
-Change from previous week
-```{r}
-d_long_chg_prev |> 
-  ggplot(aes(x = add_goal, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Previous",
-       y = "BDI (Continuous)",
-       title = "Number of goals added (Change from Previous)")
-```
-
-Change from average
-```{r}
-d_long_chg_avg |> 
-  ggplot(aes(x = add_goal, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Average",
-       y = "BDI (Continuous)",
-       title = "Number of goals added (Change from Average)")
-```
-
-#### Badges earned
-
-Change from baseline
-```{r}
-d_long_chg_wk1 |> 
-  ggplot(aes(x = badges_earned, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.3, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Baseline",
-       y = "BDI (Continuous)",
-       title = "Badges earned (Change from Baseline)")
-```
-
-Change from previous week
-```{r}
-d_long_chg_prev |> 
-  ggplot(aes(x = badges_earned, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Previous",
-       y = "BDI (Continuous)",
-       title = "Badges earned (Change from Previous)")
-```
-
-Change from average
-```{r}
-d_long_chg_avg |> 
-  ggplot(aes(x = badges_earned, y = bdi_outcome_cont)) +
-  geom_point(alpha = 0.1, shape = 5) +
-  geom_smooth() +
-  facet_wrap(vars(week), nrow = 4, scales = "free") +
-  labs(x = "Change from Average",
-       y = "BDI (Continuous)",
-       title = "Badges earned (Change from Average)")
+tbl_mood_days <- d |>
+  tbl_summary(by = phq_outcome_cat,
+              include = c(contains(str_c(stem_vars[11], "_chg"))),
+              digits = all_continuous() ~ 2
+  ) |>
+  modify_header(label ~ "Predictor") |>
+  modify_spanning_header(c("stat_1", "stat_2") ~ "PHQ8 Category") |>
+  add_p(test.args = c("mood_days_chg_from_prev_wk3", "mood_days_chg_from_prev_wk7",
+                      "mood_days_chg_from_prev_wk8") ~ list(
+                        simulate.p.value = TRUE
+                      ),
+        pvalue_fun = label_style_pvalue(digits = 3))
+
+tbl_mood_days
 ```
